@@ -1,6 +1,7 @@
 import os
 import yaml
-from torch.utils.data import Dataset, DataLoader
+import warnings
+from torch.utils.data import Dataset
 
 """
     torch_dataset模块
@@ -26,10 +27,23 @@ def check_path_exists(*paths : str) -> None:
     '''
     for path in paths:
         if not os.path.exists(path):
-            print(f'{path} dose not exist') 
+            warnings.simplefilter(f'{path} dose not exist!') 
+
+def check_and_make_folder(*paths : str) -> bool:
+    '''
+    检查每个文件夹是否存在 若不存在则创建 不输出任何警告
+    '''
+    for path in paths:
+        if not os.path.exists(path):
+            os.makedirs(path)
+    return True
+
 
 config_path = os.path.join('.','config.yaml')
 config_info = read_config(config_path=config_path)
+
+hdf5_dir = os.path.join('..', 'hdf5_files')
+check_and_make_folder(hdf5_dir)
 
 if not config_info == None:
     dataset_path = os.path.join(config_info['path']['parent'], config_info['path']['dataset'])
