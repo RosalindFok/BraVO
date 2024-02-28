@@ -1,3 +1,6 @@
+# 可选择的数据集名称
+dataset_name : "algnauts" # "nsd" "nod"
+
 # 文件路径
 path:
   parent: ".."
@@ -5,3 +8,17 @@ path:
   algnauts: "algnauts_2023_challenge_data"
   nsd: "NSD"
   nod: "NOD"
+
+# 手动选择受试者
+subjects:
+  algnauts: # id 1~8
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+  nsd: 
+  nod: 

@@ -12,22 +12,33 @@ import time
 import mmcv
 import numpy as np
 from tqdm import tqdm
-from torch_dataset import Dataset, algnauts_path, hdf5_dir
+from torch import IntTensor
+from torch_dataset import Dataset, algnauts_path, hdf5_dir, config_info
 
 subj_id_list = [os.path.join(algnauts_path, x) for x in os.listdir(algnauts_path) if os.path.isdir(os.path.join(algnauts_path, x))]
 subfolder_path_list = [[os.path.join(x, y) for y in os.listdir(x)] for x in subj_id_list] # [[roi_masks, test_split, training_split], ...]
 algnauts_hdf5_path = os.path.join(hdf5_dir, 'algnauts.hdf5')
 
 class algnauts(Dataset):
-
-    # TODO 增加可选参数表示只使用那些受试者的数据
-
-    def __init__(self) -> None:
+    '''
+    单个受试者 每个受试者训练一个模型
+    '''
+    def __init__(self, subject_id : int) -> None:
         super().__init__()
-        # 数据集名称
-        self.dataset_name = 'algnauts'
-        # 受试者人数
-        self.subject_num = len(subj_id_list)
+        # 当前的受试者id
+        self.subject_id = subject_id
+        # 当前受试者观看的图像数目
+        self.images_num = -1
+        # 当前受试者观看的图像
+        self.images = None
+        # 当前受试者观看的图像路径
+        self.images_path = None
+        # 当前受试者的左脑fMRI
+        self.lh_fmri = None
+        # 当前受试者的右脑fMRI
+        self.rh_fmri = None
+        # 当前受试者的roi文件夹路径
+        self.roi_path = None
 
         # TODO preprocess_tutorial.ipynb 中所说的每个刺激图像的AlexNet特征
         # TODO FancyBrain 能否研究人脑观测一系列图片、两个图片之间的脑活动能反映出什么，从而连接成奇妙的视频？
@@ -70,7 +81,7 @@ class algnauts(Dataset):
                                     shape = (stimulus images , LH/RH vertices)
                                 '''
                                 shape = data.shape 
-                                assert len(images_dataset) == shape
+                                assert len(images_dataset) == shape[0]
                                 # fMRI影像创建为 lh_fmri和rh_fmri  数据集, 分别代表左半球和右半球
                                 # 左半球
                                 if 'lh_training_fmri' in fmri_path:
@@ -89,9 +100,38 @@ class algnauts(Dataset):
                                 roi_path_dataset[i] = roi_path
             end_time = time.time()
             print(f'It took {round((end_time-start_time)/60, 2)} minutes to generate {algnauts_hdf5_path}.')
+    
+        # 读取algnauts数据集的hdf5文件中的内容
+        print(f'Now is reading HDF5: {algnauts_hdf5_path}.')
+        start_time = time.time()
+        with h5py.File(algnauts_hdf5_path, 'r') as f:
+            data = f[str(self.subject_id)]
+            assert len(data['imgs'][:])==len(data['imgs_path'][:])==len(data['lh_fmri'][:])==len(data['rh_fmri'][:])
+            self.images_num = len(data['imgs'][:])
+            self.images = data['imgs'][:]
+            self.images_path = data['imgs_path'][:]
+            self.lh_fmri = data['lh_fmri'][:]
+            self.rh_fmri = data['rh_fmri'][:]
+            self.roi_path = data['roi_path'][:].tolist()*self.images_num
+        end_time = time.time()
+        print(f'It took {round((end_time-start_time)/60, 2)} minutes to read {algnauts_hdf5_path}.\n')
     def __getitem__(self, index): # index = range(0, __len__'s return value)
+        # 返回 单张图像内容 该图像路径 该图像在左脑对应的fMRI 该图像在右脑对应的fMRI roi数据的路径
 
-        # 返回
-        return index
+
+        # TODO 图像数据的排序 跟fMRI中影像的排序怎么对应得上的？？？？？？？
+
+
+        return (
+                    self.images[index], 
+                    self.images_path[index], 
+                    self.lh_fmri[index], 
+                    self.rh_fmri[index], 
+                    self.roi_path[index]
+                )
+        
+        # 可能需要data['imgs'][:][index]这样的
     def __len__(self) -> int:
-        return self.subject_num
+        assert self.images_num > 0
+        return self.images_num
+    
