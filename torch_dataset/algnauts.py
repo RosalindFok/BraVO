@@ -12,8 +12,8 @@ import time
 import mmcv
 import numpy as np
 from tqdm import tqdm
-from torch import IntTensor
-from torch_dataset import Dataset, algnauts_path, hdf5_dir, config_info
+from torch.utils.data import Dataset
+from torch_dataset import algnauts_path, hdf5_dir
 
 subj_id_list = [os.path.join(algnauts_path, x) for x in os.listdir(algnauts_path) if os.path.isdir(os.path.join(algnauts_path, x))]
 subfolder_path_list = [[os.path.join(x, y) for y in os.listdir(x)] for x in subj_id_list] # [[roi_masks, test_split, training_split], ...]
@@ -25,7 +25,7 @@ class algnauts(Dataset):
     '''
     def __init__(self, subject_id : int) -> None:
         super().__init__()
-        # 当前的受试者id
+        # 当前受试者的id
         self.subject_id = subject_id
         # 当前受试者观看的图像数目
         self.images_num = -1
@@ -43,12 +43,15 @@ class algnauts(Dataset):
         # TODO preprocess_tutorial.ipynb 中所说的每个刺激图像的AlexNet特征
         # TODO FancyBrain 能否研究人脑观测一系列图片、两个图片之间的脑活动能反映出什么，从而连接成奇妙的视频？
 
+        # 所有受试者保存到一个HDF5文件中
         # 如果不存在algnauts数据集的hdf5文件 -> 在hdf5文件写入每个受试者的刺激图像、大脑fMRI影像、roi文件路径
         if not os.path.exists(algnauts_hdf5_path):
             start_time = time.time()
             with h5py.File(algnauts_hdf5_path, 'w') as f:
                 for each_subj in subfolder_path_list:
                     subj_id = each_subj[0].split(os.sep)[-2][-1]
+                    if not subj_id == self.subject_id:
+                        continue
                     assert 0 <= int(subj_id) <= 8
                     # 每个受试者整理为一个hdf5的group
                     # 每个group中包含的dataset: images, lh_fmri, rh_fmri, roi_path
@@ -63,10 +66,13 @@ class algnauts(Dataset):
                             fmri_dir = [os.path.join(path, d) for d in os.listdir(path) if 'fmri' in d][0]
                             # 该数据集中所有的图片均为png格式 且 已经裁剪至425×425, 通道为3
                             # 刺激图像创建为 images 数据集; 对图像的文件名创建为 images_path_dataset 数据集. 两个数据集相对应的位置存放的path和image相对应
-                            images_dataset = group.create_dataset(name='imgs', shape=(len(os.listdir(imgs_dir)), 425, 425, 3), dtype=np.dtype('uint8'))
-                            images_path_dataset = group.create_dataset(name='imgs_path', shape=(len(os.listdir(imgs_dir)),), dtype=h5py.string_dtype(encoding='utf-8'))
+                            imgs_list = os.listdir(imgs_dir)
+                            imgs_list.sort() # 进行排序 使得刺激图像与fMRI中的位置可以对应
+                            images_dataset = group.create_dataset(name='imgs', shape=(len(imgs_list), 425, 425, 3), dtype=np.dtype('uint8'))
+                            images_path_dataset = group.create_dataset(name='imgs_path', shape=(len(imgs_list),), dtype=h5py.string_dtype(encoding='utf-8'))
                             
-                            for i, image_path in enumerate(tqdm(os.listdir(imgs_dir), leave=True, desc=f'sub-{subj_id}')):
+
+                            for i, image_path in enumerate(tqdm(imgs_list, leave=True, desc=f'sub-{subj_id}')):
                                 assert '.png' in image_path
                                 image_png = mmcv.imread(os.path.join(imgs_dir, image_path)) 
                                 images_path_dataset[i] = image_path
@@ -114,14 +120,10 @@ class algnauts(Dataset):
             self.rh_fmri = data['rh_fmri'][:]
             self.roi_path = data['roi_path'][:].tolist()*self.images_num
         end_time = time.time()
-        print(f'It took {round((end_time-start_time)/60, 2)} minutes to read {algnauts_hdf5_path}.\n')
+        print(f'It took {round((end_time-start_time)/60, 2)} minutes to read {algnauts_hdf5_path}.')
+    
     def __getitem__(self, index): # index = range(0, __len__'s return value)
-        # 返回 单张图像内容 该图像路径 该图像在左脑对应的fMRI 该图像在右脑对应的fMRI roi数据的路径
-
-
-        # TODO 图像数据的排序 跟fMRI中影像的排序怎么对应得上的？？？？？？？
-
-
+        # 返回: 单张图像内容, 该图像路径, 该图像在左脑对应的fMRI, 该图像在右脑对应的fMRI, roi数据的路径
         return (
                     self.images[index], 
                     self.images_path[index], 
@@ -129,8 +131,7 @@ class algnauts(Dataset):
                     self.rh_fmri[index], 
                     self.roi_path[index]
                 )
-        
-        # 可能需要data['imgs'][:][index]这样的
+    
     def __len__(self) -> int:
         assert self.images_num > 0
         return self.images_num

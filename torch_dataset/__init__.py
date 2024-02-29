@@ -1,7 +1,6 @@
 import os
 import yaml
 import warnings
-from torch.utils.data import Dataset
 
 """
     torch_dataset模块
