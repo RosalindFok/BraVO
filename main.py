@@ -10,6 +10,12 @@ from torch.utils.data import DataLoader
 from torch_dataset import algnauts, nod, nsd, config_info
 
 def main() -> None:
+
+
+    
+    # TODO Bravo Brain 能否研究人脑观测一系列图片、两个图片之间的脑活动能反映出什么，从而连接成奇妙的视频？
+
+
     # 加载当前实验所使用的数据集
     dataset_name = config_info['dataset_name']
     print(f'{"-"*8}Now is working on dataset {dataset_name}.{"-"*8}')

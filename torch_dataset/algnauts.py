@@ -41,7 +41,6 @@ class algnauts(Dataset):
         self.roi_path = None
 
         # TODO preprocess_tutorial.ipynb 中所说的每个刺激图像的AlexNet特征
-        # TODO FancyBrain 能否研究人脑观测一系列图片、两个图片之间的脑活动能反映出什么，从而连接成奇妙的视频？
 
         # 所有受试者保存到一个HDF5文件中
         # 如果不存在algnauts数据集的hdf5文件 -> 在hdf5文件写入每个受试者的刺激图像、大脑fMRI影像、roi文件路径
