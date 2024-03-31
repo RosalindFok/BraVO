@@ -39,7 +39,7 @@ transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
         ]) 
-# TODO 针对不同的数据集，在这里改
+# TODO CHANGE the DATASET
 def image_loader() -> tuple[dict, dict]:
     image_path_list = os.path.join('..', 'dataset', 'split')
     image_path_list = [os.path.join(image_path_list, x) for x in os.listdir(image_path_list)]
@@ -62,12 +62,13 @@ def blip_clip_process(path_dict : dict, image_dict : dict) -> tuple[list, list, 
             path_list.append(path_dict[index].split(os.sep)[-1])
             caption_list.append(caption)
 
+        # Extract features via BLIP
         blip_feature_extractor_model.eval()
         multimodal_feature = blip_feature_extractor_model(image, caption, mode='multimodal')[0,0] # type=torch.Tensor, shape=torch.Size([768])
         image_feature = blip_feature_extractor_model(image, caption, mode='image')[0,0] # type=torch.Tensor, shape=torch.Size([768])
         text_feature = blip_feature_extractor_model(image, caption, mode='text')[0,0] # type=torch.Tensor, shape=torch.Size([768])
 
-        # CLIP: image 2 embedding, caption 2 embedding
+        # Extract features via CLIP
         clip_model.eval()
         with torch.no_grad():
             image_features = clip_model.encode_image(image)

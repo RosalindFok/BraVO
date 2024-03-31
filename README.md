@@ -1,6 +1,6 @@
 # BraVE
 Brain Vision Explainability
-使用基于深度学习的方法，对人类的视觉皮层进行功能或者结构的建模
+Utilizing deep learning-based methods for functional or structural modeling of the human visual cortex.
 
 
 ## Module 1: image2caption via CLIP and BLIP
@@ -22,7 +22,7 @@ cd image2caption/CLIP && python setup.py install && cd ../../
 ```
 
 ### Run 
-Run this module in your platform: `python -m image2caption`
+Run this module in your platform: `python -m image2caption` </br>
 Run this module in BsccCloud: 
 ``` shell
 module load anaconda/2021.11 
