@@ -6,10 +6,22 @@ Brain Vision Explainability
 ## Module 1: image2caption via CLIP and BLIP
 ### Setup Environment
 ```shell
-conda create --name CLIP python=3.11
+module load anaconda/2021.11 
+module load cuda/11.8
+conda create --name BandCLIP python=3.11
+
+source activate BandCLIP
+cd ./BraVE
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-pip install git+https://github.com/openai/CLIP.git
-pip install pip install fairscale -i https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install tqdm -i https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install regex -i https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install fairscale -i https://pypi.tuna.tsinghua.edu.cn/simple/
+cd image2caption/CLIP
+python setup.py install 
+cd ../../
+pip install timm -i https://pypi.tuna.tsinghua.edu.cn/simple/
+pip install transformers -i https://pypi.tuna.tsinghua.edu.cn/simple/
+
 ```
 
-Run this module: `cd BraVE && python -m image2caption`
+Run this module: `python -m image2caption`
