@@ -11,4 +11,4 @@ export export PYTHONUNBUFFERED=1
 module load anaconda/2021.11 
 module load cuda/11.8
 source activate BandCLIP
-python -m image2caption
+python -m image2caption.img2cap

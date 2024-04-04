@@ -22,7 +22,7 @@ cd image2caption/CLIP && python setup.py install && cd ../../
 ```
 
 ### Run 
-Run this module in your platform: `python -m image2caption` </br>
+Run this module in your platform: `python -m image2caption.img2cap` </br>
 Run this module in BsccCloud: 
 ``` shell
 module load anaconda/2021.11 
