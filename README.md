@@ -1,5 +1,5 @@
-# BraVE
-Brain Vision Explainability
+# BraVO
+Brain Visual Observer
 Utilizing deep learning-based methods for functional or structural modeling of the human visual cortex.
 
 
