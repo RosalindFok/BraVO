@@ -53,7 +53,7 @@
 **Cite as:**
 > Mauro Manassi, Bilge Sayim, Michael H. Herzog; When crowding of crowding leads to uncrowding. Journal of Vision 2013;13(13):10. https://doi.org/10.1167/13.13.10.
 
-从V1$\rightarrow$V2$\rightarrow$V4$\rightarrow$PIT$\rightarrow$IT 信息的逐层处理过程中，对应的神经元的感受野越来越大
+从V1 $\rightarrow$ V2 $\rightarrow$ V4 $\rightarrow$ PIT $\rightarrow$ IT 信息的逐层处理过程中，对应的神经元的感受野越来越大
 
 每层之间感受野增大的系数大体为2.5
 
