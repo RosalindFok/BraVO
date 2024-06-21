@@ -1,6 +1,9 @@
-# BraVO
-Brain Visual Observer
+# BraVO: Brain Visual Observer
 Utilizing deep learning-based methods for functional or structural modeling of the human visual cortex.
+
+Decoding: Engineering issues, neural activity $\rightarrow$ visual stimulation 
+
+Encoding: Scientific issues, visual stimulation $\rightarrow$ neural activity
 
 
 ## Module 1: image2caption via CLIP and BLIP
