@@ -8,6 +8,7 @@
     - [1.2. Articles](#12-articles)
       - [\[2001, Science\]Distributed and Overlapping Representations of Faces and Objects in Ventral Temporal Cortex](#2001-sciencedistributed-and-overlapping-representations-of-faces-and-objects-in-ventral-temporal-cortex)
       - [\[2008, Front Syst Neurosci\]Representational Similarity Analysis – Connecting the Branches of Systems Neurosci](#2008-front-syst-neuroscirepresentational-similarity-analysis--connecting-the-branches-of-systems-neurosci)
+    - [1.3. Knowledge](#13-knowledge)
       - [\[2013, jov\]When crowding of crowding leads to uncrowding](#2013-jovwhen-crowding-of-crowding-leads-to-uncrowding)
       - [\[2013, J Neurophysiol\]Compressive spatial summation in human visual cortex](#2013-j-neurophysiolcompressive-spatial-summation-in-human-visual-cortex)
   - [2. Diffusiom Model's Family](#2-diffusiom-models-family)
@@ -27,17 +28,21 @@
       - [\[2023, NeurIPS(spotlight)\]Reconstructing the Mind’s Eye: fMRI-to-Image with Contrastive Learning and Diffusion Priors](#2023-neuripsspotlightreconstructing-the-minds-eye-fmri-to-image-with-contrastive-learning-and-diffusion-priors)
       - [\[2023, NeurIPS(oral)\]Brain Diffusion for Visual Exploration: Cortical Discovery using Large Scale Generative Models](#2023-neuripsoralbrain-diffusion-for-visual-exploration-cortical-discovery-using-large-scale-generative-models)
       - [\[2023, ACMMM\]MindDiffuser: Controlled Image Reconstruction from Human Brain Activity with Semantic and Structural Diffusion](#2023-acmmmminddiffuser-controlled-image-reconstruction-from-human-brain-activity-with-semantic-and-structural-diffusion)
+      - [\[2024, ICML\]MindEye2: Shared-Subject Models Enable fMRI-To-Image With 1 Hour of Data](#2024-icmlmindeye2-shared-subject-models-enable-fmri-to-image-with-1-hour-of-data)
   - [4. Datasets and Tools](#4-datasets-and-tools)
     - [4.1. BIDS(Brain Imaging Data Structure)](#41-bidsbrain-imaging-data-structure)
-    - [4.2. CBICA Image Processing Portal](#42-cbica-image-processing-portal)
-    - [4.3. GLIRT (Groupwise and Longitudinal Image Registration Toolbox)](#43-glirt-groupwise-and-longitudinal-image-registration-toolbox)
-    - [4.4. FreeSurfer Download and Install](#44-freesurfer-download-and-install)
+    - [4.2. Tools](#42-tools)
+      - [CBICA Image Processing Portal](#cbica-image-processing-portal)
+      - [GLIRT (Groupwise and Longitudinal Image Registration Toolbox)](#glirt-groupwise-and-longitudinal-image-registration-toolbox)
+      - [FreeSurfer Download and Install](#freesurfer-download-and-install)
+    - [4.3. Datasets](#43-datasets)
   - [5. Tips](#5-tips)
 
 ## 1. Principles of Neural Science
 ### 1.1. Website
 #### Learning Neurology
 [website](https://learningneurology.com/)
+
 ### 1.2. Articles
 #### [2001, Science]Distributed and Overlapping Representations of Faces and Objects in Ventral Temporal Cortex
 **Cite as:**
@@ -46,9 +51,45 @@
 #### [2008, Front Syst Neurosci]Representational Similarity Analysis – Connecting the Branches of Systems Neurosci
 **Cite as:**
 > Kriegeskorte N, Mur M, Bandettini P. Representational similarity analysis - connecting the branches of systems neuroscience. Front Syst Neurosci. 2008 Nov 24;2:4. doi: 10.3389/neuro.06.004.2008. PMID: 19104670; PMCID: PMC2605405. 
-
 在特征空间上找到哪个脑区对图像的哪个特征反映。
 
+### 1.3. Knowledge
+- 医学图像特点
+  - 不均匀的组织器官、磁场 $\rightarrow$ 灰度不均匀
+  - 成像设备局限性、组织的蠕动 $\rightarrow$ 伪影和噪声
+  - 局部体效应 $\rightarrow$ 组织边缘模糊
+  - 病变组织 $\rightarrow$ 病变边缘不明确 
+- 人体大多数病变的T1值、T2值均较相应的正常组织大，因而在T1W1上比正常组织“黑”，在T2W1上比正常组织“白”
+- Terms(从大到小): subjects sessions runs volume slices voxels
+- Plane:
+  - sagittal plane: divide body into $\leftrightarrow$ right 
+  - coronal plane: divide body into anterior $\leftrightarrow$ posterior 
+  - axial plane: divide body into superior $\leftrightarrow$ inferior 
+- ITK提供丰富的图像分割和配准等大量的医学图像处理算法; VTK则是一种基于opengl的渲染引擎; CTK为支持生物医学图像计算的通用公共包  
+- Data
+  - Structural images(T1):
+    - hight resolution, 3D 
+    - to distinguish different types of tissue
+  - Functional images(T2*):
+    - lower spatial resolution, 4D(time+space)
+    - to relate changes in BOLD signal to an experimental manipulation
+    - TE(Echo time) = time between excitation and data acquisition 
+    - TR(Repetition time) = time between successive excitation pulses
+  - Behavioral data:
+    - recording experimental design
+- Toolboox for BOLD fMRI processing:
+  - [fMRIPrep](https://fmriprep.org/en/stable/)
+  - [XCP Engine](https://xcpengine.readthedocs.io/)
+- Procedures for BOLD fMRI processing:
+  - skull-stripped
+  - slice-timing correction
+  - correction for susceptibility distortions
+  - T1 segmentation
+  - co-registration with the T1 image
+  - normalization to MNI space
+  - De-meaning and removing linear trends
+  - reress head-motion parameters
+  - Bandpass filtering
 #### [2013, jov]When crowding of crowding leads to uncrowding
 **Cite as:**
 > Mauro Manassi, Bilge Sayim, Michael H. Herzog; When crowding of crowding leads to uncrowding. Journal of Vision 2013;13(13):10. https://doi.org/10.1167/13.13.10.
@@ -134,6 +175,9 @@ Here, we developed a novel fMRI-conditional video generative adversarial network
 **Cite as:**
 > Lu Y, Du C, Zhou Q, et al. MindDiffuser: Controlled Image Reconstruction from Human Brain Activity with Semantic and Structural Diffusion[C]//Proceedings of the 31st ACM International Conference on Multimedia. 2023: 5899-5908.
 
+#### [2024, ICML]MindEye2: Shared-Subject Models Enable fMRI-To-Image With 1 Hour of Data
+**Cite as:**
+> Not yet
 
 
 ## 4. Datasets and Tools
@@ -141,15 +185,18 @@ Here, we developed a novel fMRI-conditional video generative adversarial network
 [BIDS](https://bids.neuroimaging.io/)
 [Filenames Link](https://bids-standard.github.io/bids-starter-kit/folders_and_files/files.html)
 
-### 4.2. CBICA Image Processing Portal
+### 4.2. Tools
+#### CBICA Image Processing Portal
 [CBICA](https://ipp.cbica.upenn.edu/)
 [Cancer Imaging Phenomics Toolkit (CaPTk), currently focusing on brain, breast, and lung cancer.](https://www.med.upenn.edu/cbica/captk/)
 
-### 4.3. GLIRT (Groupwise and Longitudinal Image Registration Toolbox) 
+#### GLIRT (Groupwise and Longitudinal Image Registration Toolbox) 
 [groupwise registration and longitudinal registration](https://www.nitrc.org/projects/glirt)
 
-### 4.4. FreeSurfer Download and Install
+#### FreeSurfer Download and Install
 [Latest Version Release](https://surfer.nmr.mgh.harvard.edu/fswiki/DownloadAndInstall) 
+
+### 4.3. Datasets
 
 ## 5. Tips
 - 尽可能全面的引用别人的论文，努力碰到审稿人的论文
