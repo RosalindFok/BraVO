@@ -35,7 +35,6 @@ pip install opencv-python -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Success
 **Note:**
 - Full data: subj01, subj02, subj05, subj07
 - Download annotation of COCO from [link](http://images.cocodataset.org/annotations/annotations_trainval2017.zip), unzip it and then place the whole folder `annotations` under `dataset/NSD/nsddata_stimuli/stimuli/nsd`
-总结下CVPR2023、BrainDiVE和那个什么2用了哪些数据，怎么用的
 - [NSD Data Manual](https://cvnlab.slite.page/p/CT9Fwl4_hc/NSD-Data-Manual)
 
 **File path | Description**
@@ -53,8 +52,12 @@ pip install opencv-python -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Success
 ├── BraVO
 │   ├── dirs ...
 │   └── files ...
-└── YOUR_OWN_FILE
+└── BraVO_saved
 ```
+
+**Step 1:**
+change the `subj_id` in `make_nsd_data.py` <br>
+run `python make_nsd_data.py`
 
 ## Delete the Enviorment:
 ``` shell
@@ -63,7 +66,7 @@ conda env remove -n BraVO
 
 
 
-## Module 1: image2caption via CLIP and BLIP
+<!-- ## Module 1: image2caption via CLIP and BLIP
 ### Setup Environment
 ```shell
 module load anaconda/2021.11 cuda/11.8
@@ -85,4 +88,4 @@ chmod 777 run.sh
 dsub -s run.sh # submit 
 djob           # check id
 djob -T ID     # cancel
-```
+``` -->
