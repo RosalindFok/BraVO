@@ -27,6 +27,7 @@ pip install h5py -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Successfully ins
 pip install pandas -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Successfully installed pandas-2.2.2 python-dateutil-2.9.0.post0 pytz-2024.1 six-1.16.0 tzdata-2024.1
 pip install scipy -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Successfully installed scipy-1.14.0
 pip install opencv-python -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Successfully installed opencv-python-4.10.0.84
+
 ```
 
 ## Prepare the Data:
@@ -56,14 +57,15 @@ pip install opencv-python -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Success
 ```
 
 **Step 1:**
-change the `subj_id` in `make_nsd_data.py` <br>
-run `python make_nsd_data.py`
+run `python make_nsd_data.py`  for subj 01, 02, 05, 07
+
+**Step 2:**
+
 
 ## Delete the Enviorment:
 ``` shell
 conda env remove -n BraVO
 ```
-
 
 
 <!-- ## Module 1: image2caption via CLIP and BLIP

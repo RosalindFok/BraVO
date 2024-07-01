@@ -8,8 +8,11 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from models import BLIP2_Tools
 from utils import NSD_dir_path, BraVO_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, merge_dicts_if_no_conflict
+
+blip2_tools = BLIP2_Tools()
 
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
@@ -158,7 +161,7 @@ class NSD_DATA():
             assert len(response) == len(nii_data), print(f'Number of responses and betas are not equal in session {session_id}.')
             
             if space_type == 'func1mm':
-                for trial, fmri in tqdm(zip(response, nii_data), total=len(nii_data), desc=f'Processing session {session_id}', leave=True):
+                for trial, fmri in tqdm(zip(response, nii_data), total=len(nii_data), desc=f'Processing {self.subj} session {session_id}', leave=True):
                     # correct trial
                     if trial[column_of_ISCORRECT] == 1:
                         run_id = int(trial[column_of_RUN])
@@ -176,11 +179,20 @@ class NSD_DATA():
                         # fMRI
                         save_nii_file(fmri, join_paths(saved_path, 'fmri.nii.gz'))
                         # image
-                        image = cv2.cvtColor(imgBrick[KID_73], cv2.COLOR_RGB2BGR)
+                        image_rgb = imgBrick[KID_73]
+                        image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
                         cv2.imwrite(join_paths(saved_path, 'image.png'), image)
                         # caption and other infos
                         OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
                         caption = captsions[stim_info[KID_73]] # list[str]
+
+                        # TODO  caption和image处理成BLIP或者CLIP embedding fMRI经过脑图谱或者其他的什么处理放别地方？
+                        # BLIP encoder
+
+                        for text in caption:
+                            multi_embedding = blip2_tools.multimodal_features(image_rgb=image_rgb, caption=text)
+                        exit(0)
+
                         data = {'ISOLD' : 'novel' if OLD_flag == 0 else 'old','caption':caption}
                         with open(join_paths(saved_path, 'info.json'), 'w', encoding='utf-8') as f:
                             json.dump(data, f, indent=4)
@@ -193,3 +205,6 @@ class NSD_DATA():
 
 # make pairs of NSD
 NSD_DATA(subj_id=1)        
+NSD_DATA(subj_id=2)        
+NSD_DATA(subj_id=5)        
+NSD_DATA(subj_id=7)        

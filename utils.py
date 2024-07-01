@@ -8,13 +8,14 @@ import nibabel as nib
 
 
 __all__ = ['join_paths', 'read_nii_file', 'save_nii_file', 'check_and_make_dirs', 'read_json_file', 'merge_dicts_if_no_conflict'
-           'NSD_dir_path', 'BraVO_saved_dir_path']
+           'NSD_dir_path', 'BraVO_saved_dir_path', 'bert_base_uncased_dir_path']
 
 ''' utility functions '''
 join_paths = lambda *args: os.path.join(*args)
 read_nii_file = lambda path: [nib.load(path).header, nib.load(path).get_fdata()]
 save_nii_file = lambda data, path: nib.save(nib.Nifti1Image(data, np.eye(4)), path)
 check_and_make_dirs = lambda path: os.makedirs(path, exist_ok=True)
+
 def read_json_file(path : str)->dict[any, any]:
     """
     Read a JSON file from the specified path and return its content.
@@ -55,3 +56,6 @@ def merge_dicts_if_no_conflict(dict1 : dict[any, any], dict2 : dict[any, any]) -
 NSD_dir_path = join_paths('..', 'dataset', 'NSD')
 BraVO_saved_dir_path = join_paths('..', 'BraVO_saved')
 check_and_make_dirs(BraVO_saved_dir_path)
+
+large_files_for_BraVO_dir_path = join_paths(os.getcwd(), '..', 'large_files_for_BraVO')
+bert_base_uncased_dir_path = join_paths(large_files_for_BraVO_dir_path, 'bert-base-uncased')
