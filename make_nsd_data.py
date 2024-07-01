@@ -111,19 +111,6 @@ class NSD_DATA():
                     annotations[ca['image_id']].append(ca['caption'])
             return annotations
         
-        def __extract_instances__(instances_categories : dict[str, any]) -> dict[any, any]:
-            categories = {} # {key=id : value={key=supercategory : value, key=name : value}}
-            images_list = instances_categories['annotations']
-            categories_list = instances_categories['categories']
-            
-            categories_id_dict = {}
-            for categories_info in categories_list:
-                categories_id_dict[categories_info['id']] = {'supercategory':categories_info['supercategory'], 'name':categories_info['name']}
-            
-            # TODO: each image has serveral instances, each instance has a category_id
-            
-            return categories
-        
         captions_train2017 = read_json_file(path=join_paths(self.coco_annotation_dir_path, 'captions_train2017.json'))
         captions_val2017 = read_json_file(path=join_paths(self.coco_annotation_dir_path, 'captions_val2017.json'))
         captions_train_annotations = captions_train2017['annotations']

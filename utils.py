@@ -16,6 +16,16 @@ read_nii_file = lambda path: [nib.load(path).header, nib.load(path).get_fdata()]
 save_nii_file = lambda data, path: nib.save(nib.Nifti1Image(data, np.eye(4)), path)
 check_and_make_dirs = lambda path: os.makedirs(path, exist_ok=True)
 def read_json_file(path : str)->dict[any, any]:
+    """
+    Read a JSON file from the specified path and return its content.
+
+    Args:
+        path (str): The path to the JSON file.
+
+    Returns:
+        dict[any, any]: A dictionary object containing the content of the JSON file.
+
+    """
     with open(path, 'r') as f:
         data = json.load(f)
     return data
@@ -26,9 +36,12 @@ def merge_dicts_if_no_conflict(dict1 : dict[any, any], dict2 : dict[any, any]) -
     If there are no key conflicts, return the merged dictionary;
     if there are conflicts, return None.
     
-    :param dict1: The first dictionary
-    :param dict2: The second dictionary
-    :return: The merged dictionary or None
+    Args:
+        dict1: The first dictionary
+        dict2: The second dictionary
+
+    Returns:
+        The merged dictionary or None
     """
     # Check for key conflicts
     if any(key in dict1 for key in dict2):

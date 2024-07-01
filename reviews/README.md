@@ -8,14 +8,15 @@
     - [1.2. Articles](#12-articles)
       - [\[2001, Science\]Distributed and Overlapping Representations of Faces and Objects in Ventral Temporal Cortex](#2001-sciencedistributed-and-overlapping-representations-of-faces-and-objects-in-ventral-temporal-cortex)
       - [\[2008, Front Syst Neurosci\]Representational Similarity Analysis – Connecting the Branches of Systems Neurosci](#2008-front-syst-neuroscirepresentational-similarity-analysis--connecting-the-branches-of-systems-neurosci)
-    - [1.3. Knowledge](#13-knowledge)
       - [\[2013, jov\]When crowding of crowding leads to uncrowding](#2013-jovwhen-crowding-of-crowding-leads-to-uncrowding)
       - [\[2013, J Neurophysiol\]Compressive spatial summation in human visual cortex](#2013-j-neurophysiolcompressive-spatial-summation-in-human-visual-cortex)
+    - [1.3. Knowledge](#13-knowledge)
   - [2. Diffusiom Model's Family](#2-diffusiom-models-family)
     - [2.1. Reviews](#21-reviews)
       - [\[2023, ACM Computing Surveys\]Diffusion Models: A Comprehensive Survey of Methods and Applications](#2023-acm-computing-surveysdiffusion-models-a-comprehensive-survey-of-methods-and-applications)
     - [2.2. Articles](#22-articles)
       - [\[2023, Nature Communications\] High-dimensional topographic organization of visual features in the primate temporal lobe](#2023-nature-communications-high-dimensional-topographic-organization-of-visual-features-in-the-primate-temporal-lobe)
+      - [\[2023, ICML\] Diffusion Based Representation Learning](#2023-icml-diffusion-based-representation-learning)
   - [3. Neural Encoding and Decoding](#3-neural-encoding-and-decoding)
     - [3.1. Reviews](#31-reviews)
       - [\[2022, Machine Intelligence Research\]Neural Decoding of Visual Information Across Different Neural Recording Modalities and Approaches](#2022-machine-intelligence-researchneural-decoding-of-visual-information-across-different-neural-recording-modalities-and-approaches)
@@ -26,9 +27,11 @@
       - [\[2023, CVPR\]Seeing Beyond the Brain: Conditional Diffusion Model with Sparse Masked Modeling for Vision Decoding](#2023-cvprseeing-beyond-the-brain-conditional-diffusion-model-with-sparse-masked-modeling-for-vision-decoding)
       - [\[2023, Scientific Reports\] Natural scene reconstruction from fMRI signals using generative latent diffusion](#2023-scientific-reports-natural-scene-reconstruction-from-fmri-signals-using-generative-latent-diffusion)
       - [\[2023, NeurIPS(spotlight)\]Reconstructing the Mind’s Eye: fMRI-to-Image with Contrastive Learning and Diffusion Priors](#2023-neuripsspotlightreconstructing-the-minds-eye-fmri-to-image-with-contrastive-learning-and-diffusion-priors)
-      - [\[2023, NeurIPS(oral)\]Brain Diffusion for Visual Exploration: Cortical Discovery using Large Scale Generative Models](#2023-neuripsoralbrain-diffusion-for-visual-exploration-cortical-discovery-using-large-scale-generative-models)
-      - [\[2023, ACMMM\]MindDiffuser: Controlled Image Reconstruction from Human Brain Activity with Semantic and Structural Diffusion](#2023-acmmmminddiffuser-controlled-image-reconstruction-from-human-brain-activity-with-semantic-and-structural-diffusion)
-      - [\[2024, ICML\]MindEye2: Shared-Subject Models Enable fMRI-To-Image With 1 Hour of Data](#2024-icmlmindeye2-shared-subject-models-enable-fmri-to-image-with-1-hour-of-data)
+      - [\[2023, NeurIPS(oral)\] Brain Diffusion for Visual Exploration: Cortical Discovery using Large Scale Generative Models](#2023-neuripsoral-brain-diffusion-for-visual-exploration-cortical-discovery-using-large-scale-generative-models)
+      - [\[2023, ACMMM\] MindDiffuser: Controlled Image Reconstruction from Human Brain Activity with Semantic and Structural Diffusion](#2023-acmmm-minddiffuser-controlled-image-reconstruction-from-human-brain-activity-with-semantic-and-structural-diffusion)
+      - [\[2023, arXiv\] Vision-Language Integration in Multimodal Video Transformers (Partially) Aligns with the Brain](#2023-arxiv-vision-language-integration-in-multimodal-video-transformers-partially-aligns-with-the-brain)
+      - [\[2024, ICML\] MindEye2: Shared-Subject Models Enable fMRI-To-Image With 1 Hour of Data](#2024-icml-mindeye2-shared-subject-models-enable-fmri-to-image-with-1-hour-of-data)
+      - [\[2024, ICLR\] Decoding natural images from EEG for object recognition](#2024-iclr-decoding-natural-images-from-eeg-for-object-recognition)
   - [4. Datasets and Tools](#4-datasets-and-tools)
     - [4.1. BIDS(Brain Imaging Data Structure)](#41-bidsbrain-imaging-data-structure)
     - [4.2. Tools](#42-tools)
@@ -52,6 +55,26 @@
 **Cite as:**
 > Kriegeskorte N, Mur M, Bandettini P. Representational similarity analysis - connecting the branches of systems neuroscience. Front Syst Neurosci. 2008 Nov 24;2:4. doi: 10.3389/neuro.06.004.2008. PMID: 19104670; PMCID: PMC2605405. 
 在特征空间上找到哪个脑区对图像的哪个特征反映。
+
+#### [2013, jov]When crowding of crowding leads to uncrowding
+**Cite as:**
+> Mauro Manassi, Bilge Sayim, Michael H. Herzog; When crowding of crowding leads to uncrowding. Journal of Vision 2013;13(13):10. https://doi.org/10.1167/13.13.10.
+
+从V1 $\rightarrow$ V2 $\rightarrow$ V4 $\rightarrow$ PIT $\rightarrow$ IT 信息的逐层处理过程中，对应的神经元的感受野越来越大
+
+每层之间感受野增大的系数大体为2.5
+
+高级别的神经元将信息集成在具有较小感受野的多个低级神经元上，编码更复杂的特征
+
+#### [2013, J Neurophysiol]Compressive spatial summation in human visual cortex
+**Cite as:**
+> Kay KN, Winawer J, Mezer A, Wandell BA. Compressive spatial summation in human visual cortex. J Neurophysiol. 2013 Jul;110(2):481-94. doi: 10.1152/jn.00105.2013. Epub 2013 Apr 24. PMID: 23615546; PMCID: PMC3727075.
+
+V1区是编码边缘和线条等基本特征 <br>
+V2区神经元对错觉轮廓有反应，是色调敏感区<br>
+V3区是信息过渡区<br>
+V4是颜色感知的主要区域，参与曲率计算、运动方向选择和背景分离<br>
+IT区是物体表达和识别区<br>
 
 ### 1.3. Knowledge
 - 医学图像特点
@@ -90,29 +113,6 @@
   - De-meaning and removing linear trends
   - reress head-motion parameters
   - Bandpass filtering
-#### [2013, jov]When crowding of crowding leads to uncrowding
-**Cite as:**
-> Mauro Manassi, Bilge Sayim, Michael H. Herzog; When crowding of crowding leads to uncrowding. Journal of Vision 2013;13(13):10. https://doi.org/10.1167/13.13.10.
-
-从V1 $\rightarrow$ V2 $\rightarrow$ V4 $\rightarrow$ PIT $\rightarrow$ IT 信息的逐层处理过程中，对应的神经元的感受野越来越大
-
-每层之间感受野增大的系数大体为2.5
-
-高级别的神经元将信息集成在具有较小感受野的多个低级神经元上，编码更复杂的特征
-
-#### [2013, J Neurophysiol]Compressive spatial summation in human visual cortex
-**Cite as:**
-> Kay KN, Winawer J, Mezer A, Wandell BA. Compressive spatial summation in human visual cortex. J Neurophysiol. 2013 Jul;110(2):481-94. doi: 10.1152/jn.00105.2013. Epub 2013 Apr 24. PMID: 23615546; PMCID: PMC3727075.
-
-V1区是编码边缘和线条等基本特征
-
-V2区神经元对错觉轮廓有反应，是色调敏感区
-
-V3区是信息过渡区
-
-V4是颜色感知的主要区域，参与曲率计算、运动方向选择和背景分离
-
-IT区是物体表达和识别区
 
 ## 2. Diffusiom Model's Family
 ### 2.1. Reviews
@@ -128,6 +128,12 @@ IT区是物体表达和识别区
 Inferotemporal Cortex (ITC) 
 Demonstrating the existence of a pair of orthogonal gradients that differ in spatial scale and revealing significant differences in the functional organization of high-level visual areas between monkey and human brains.
 We set out to tackle these challenges by constructing a high-dimensional object space and compute the selectivity of each brain location within this object space. Inspired by recent advances at the intersection of artificial intelligence and neuroscience18,35,36,37, a 25D object space was constructed using responses of units in a deep neural network to a large database of natural images, and functional MRI experiments were conducted in both monkeys and humans to map out the feature preference of the visual temporal lobe. The resulting preference maps helped us determine the functions of previously uncharted territories and reveal differences in the functional organization of high-level visual areas between monkey and human brains.
+
+#### [2023, ICML] Diffusion Based Representation Learning
+**Cite as:**
+> Sarthak Mittal, Korbinian Abstreiter, Stefan Bauer, Bernhard Schölkopf, and Arash Mehrjou. 2023. Diffusion based representation learning. In Proceedings of the 40th International Conference on Machine Learning (ICML'23), Vol. 202. JMLR.org, Article 1039, 24963–24982.
+
+DRL利用扩散模型的去噪过程来学习表示。通过优化去噪分数匹配目标,DRL能够学到帮助去噪的数据表示。
 
 ## 3. Neural Encoding and Decoding
 ### 3.1. Reviews
@@ -167,15 +173,27 @@ Here, we developed a novel fMRI-conditional video generative adversarial network
 **Cite as:**
 > Scotti P, Banerjee A, Goode J, et al. Reconstructing the mind's eye: fMRI-to-image with contrastive learning and diffusion priors[J]. Advances in Neural Information Processing Systems, 2024, 36.
 
-#### [2023, NeurIPS(oral)]Brain Diffusion for Visual Exploration: Cortical Discovery using Large Scale Generative Models
+#### [2023, NeurIPS(oral)] Brain Diffusion for Visual Exploration: Cortical Discovery using Large Scale Generative Models
 **Cite as:**
 > Luo A, Henderson M, Wehbe L, et al. Brain diffusion for visual exploration: Cortical discovery using large scale generative models[J]. Advances in Neural Information Processing Systems, 2024, 36.
 
-#### [2023, ACMMM]MindDiffuser: Controlled Image Reconstruction from Human Brain Activity with Semantic and Structural Diffusion
+#### [2023, ACMMM] MindDiffuser: Controlled Image Reconstruction from Human Brain Activity with Semantic and Structural Diffusion
 **Cite as:**
 > Lu Y, Du C, Zhou Q, et al. MindDiffuser: Controlled Image Reconstruction from Human Brain Activity with Semantic and Structural Diffusion[C]//Proceedings of the 31st ACM International Conference on Multimedia. 2023: 5899-5908.
 
-#### [2024, ICML]MindEye2: Shared-Subject Models Enable fMRI-To-Image With 1 Hour of Data
+#### [2023, arXiv] Vision-Language Integration in Multimodal Video Transformers (Partially) Aligns with the Brain
+**Cite as:**
+> arXiv 
+
+研究者们展示了一种探索预训练多模态视频变换模型的有前景的方法，该方法借鉴了神经科学关于大脑中多模态信息处理的证据。他们利用观看热门电视节目的参与者的大脑记录，分析了在与单模态和多模态大脑区域的一致性对齐上，预训练的多模态视频变换器中的多模态连接和交互的效应。根据他们的发现，视觉元素能够增强在语言处理期间掩码预测的表现，这表明模型中的跨模态表征能够提升个别模态的功能。换句话说，如果语言比作文字游戏，视觉输入就像是游戏中的提示图片，能帮助更好地解答谜题。
+
+#### [2024, ICML] MindEye2: Shared-Subject Models Enable fMRI-To-Image With 1 Hour of Data
+**Cite as:**
+> Not yet
+
+MindEye2 is first trained using data from 7 subjects in the Natural Scenes Dataset and then fine-tuned using a target held-out subject who may have scarce training data.
+
+#### [2024, ICLR] Decoding natural images from EEG for object recognition
 **Cite as:**
 > Not yet
 
