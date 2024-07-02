@@ -121,7 +121,7 @@ class Attention(nn.Module):
         if self.q_bias is not None:
             qkv_bias = torch.cat((self.q_bias, torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
         # qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
+        qkv = F.linear(input=x, weight=self.qkv.weight.to(torch.float32), bias=qkv_bias)
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
 
@@ -399,9 +399,9 @@ def convert_weights_to_fp16(model: nn.Module):
 
     def _convert_weights_to_fp16(l):
         if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Linear)):
-            l.weight.data = l.weight.data.half()
+            l.weight.data = l.weight.data
             if l.bias is not None:
-                l.bias.data = l.bias.data.half()
+                l.bias.data = l.bias.data
 
 #         if isinstance(l, (nn.MultiheadAttention, Attention)):
 #             for attr in [*[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]], "in_proj_bias", "bias_k", "bias_v"]:

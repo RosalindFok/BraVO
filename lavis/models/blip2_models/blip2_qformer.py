@@ -64,7 +64,7 @@ class Blip2Qformer(Blip2Base):
             self.visual_encoder.train = disabled_train
             logging.info("freeze vision encoder")
         self.Qformer, self.query_tokens = self.init_Qformer(
-            num_query_token, self.visual_encoder.num_features
+            num_query_token, self.visual_encoder.num_features, bert_base_uncased_dir_path
         )
         self.Qformer.resize_token_embeddings(len(self.tokenizer))
         state_dict = self.Qformer.state_dict()

@@ -12,8 +12,6 @@ from models import BLIP2_Tools
 from utils import NSD_dir_path, BraVO_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, merge_dicts_if_no_conflict
 
-blip2_tools = BLIP2_Tools()
-
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
         super().__init__()
@@ -50,6 +48,7 @@ class NSD_DATA():
         self.make_pairs()
 
     def read_behav_responses_tsv(self) -> pd.core.frame.DataFrame:
+        start_time = time.time()
         data_frame = pd.read_csv(self.behav_responses_tsv_file_path, sep='\t', encoding='utf-8')
         subj_numpyINT64 = np.int64(self.subj[-1])
         assert (data_frame['SUBJECT'] == subj_numpyINT64).all(), print(f'Subject id in tsv file is not correct.') # subj 1~8
@@ -62,16 +61,24 @@ class NSD_DATA():
         data_frame.drop(columns=['TOTAL2'], inplace=True)
         data_frame.drop(columns=['BUTTON'], inplace=True)
         data_frame.drop(columns=['MISSINGDATA'], inplace=True)
+        end_time = time.time()
+        print(f'It took {end_time - start_time:.2f} seconds to read {self.behav_responses_tsv_file_path}.')
         return data_frame
 
     def read_expdesign_mat(self) -> dict[str, any]:
+        start_time = time.time()
         mat_contents = scipy.io.loadmat(self.expdesign_mat_file_path)
+        end_time = time.time()
+        print(f'It took {end_time - start_time:.2f} seconds to read {self.expdesign_mat_file_path}.')
         return mat_contents
     
     def read_stim_info_csv(self) -> dict[int, int]:
+        start_time = time.time()
         data_frame = pd.read_csv(self.stim_info_csv_file_path)
         # cocoId: is the ID number assigned to this image in the COCO database.
         # nsdId: is the 0-based index of the image into the full set of 73k images used in the NSD experiment. Values are the same as column 1. (Note that in some other cases, 73k IDs are specified as 1-based. Here the IDs are specified as 0-based.)
+        end_time = time.time()
+        print(f'It took {end_time - start_time:.2f} seconds to read {self.stim_info_csv_file_path}.')
         return dict(zip(data_frame['nsdId'], data_frame['cocoId']))
 
     def read_betas(self, session_id : int, space_type : str = 'func1mm') -> tuple[str, np.ndarray]:
@@ -90,7 +97,7 @@ class NSD_DATA():
         else:
             raise NotImplementedError(f'Space type: {space_type} is not supported.')
         end_time = time.time()
-        print(f'Reading {file_name} took {end_time - start_time:.2f} seconds.')
+        print(f'It took {end_time - start_time:.2f} seconds to read {file_path}.')
         return space_type, data
         
     def read_stimuli_hdf5(self) -> np.ndarray:
@@ -100,7 +107,7 @@ class NSD_DATA():
             # These images are shown on a gray background with RGB value (127,127,127).
             imgBrick = f['imgBrick'][:]
         end_time = time.time()
-        print(f'Reading imgBrick(hdf5) took {end_time - start_time:.2f} seconds.')
+        print(f'It took {end_time - start_time:.2f} seconds to read {self.nsddata_stimuli_hdf5_file_path}.')
         return imgBrick
     
     def read_coco_annotation(self) -> dict[int, list[str]]:
@@ -120,10 +127,10 @@ class NSD_DATA():
         captions_val_annotations = captions_val2017['annotations']
         train_annotations = __extract_captions__(captions_train_annotations)
         val_annotations = __extract_captions__(captions_val_annotations)
-        # captions is {key=id : value=[caption1, caption2, ...]}
-        captions = merge_dicts_if_no_conflict(train_annotations, val_annotations) 
+        # captions_dict is {key=id : value=[caption1, caption2, ...]}
+        captions_dict = merge_dicts_if_no_conflict(train_annotations, val_annotations) 
         
-        return captions
+        return captions_dict
     
     def make_pairs(self) -> None:
         ## behav_responses_tsv
@@ -148,7 +155,7 @@ class NSD_DATA():
         imgBrick = self.read_stimuli_hdf5()
 
         ## captsions and instances of COCO
-        captsions = self.read_coco_annotation()
+        captions_dict = self.read_coco_annotation()
         
         train_saved_dir_path = join_paths(self.subject_saved_dir_path, 'train')
         test_saved_dir_path = join_paths(self.subject_saved_dir_path, 'test')
@@ -178,24 +185,30 @@ class NSD_DATA():
 
                         # fMRI
                         save_nii_file(fmri, join_paths(saved_path, 'fmri.nii.gz'))
-                        # image
-                        image_rgb = imgBrick[KID_73]
-                        image = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+                        # image: opencv writes via BGR, BLIP-2 encodes via RGB
+                        image = cv2.cvtColor(imgBrick[KID_73], cv2.COLOR_RGB2BGR)
+                        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                         cv2.imwrite(join_paths(saved_path, 'image.png'), image)
                         # caption and other infos
                         OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
-                        caption = captsions[stim_info[KID_73]] # list[str]
+                        captions_list = captions_dict[stim_info[KID_73]] # list[str]
 
-                        # TODO  caption和image处理成BLIP或者CLIP embedding fMRI经过脑图谱或者其他的什么处理放别地方？
-                        # BLIP encoder
-
-                        for text in caption:
-                            multi_embedding = blip2_tools.multimodal_features(image_rgb=image_rgb, caption=text)
-                        exit(0)
-
-                        data = {'ISOLD' : 'novel' if OLD_flag == 0 else 'old','caption':caption}
+                        # Encode image and caption via BLIP-2, get embedding whose dim=768
+                        save_info_json = {'ISOLD':'novel' if OLD_flag == 0 else 'old', 'caption':{}}
+                        image_embedding = BLIP2_Tools.blip2_encoder(mode='i', image_rgb=image_rgb)
+                        save_embedding_npz = {'image':image_embedding, 'caption':{}, 'multimodal':{}}
+                        for index, caption in enumerate(captions_list):
+                            caption_embedding = BLIP2_Tools.blip2_encoder(mode='t', caption=caption)
+                            multimodal_embedding = BLIP2_Tools.blip2_encoder(mode='m',image_rgb=image_rgb, caption=caption)
+                            save_embedding_npz['caption'][index] = caption_embedding
+                            save_embedding_npz['multimodal'][index] = multimodal_embedding
+                            save_info_json['caption'][str(index)] = caption
+                        # save npz, which contains embeddings  of image, caption, and multimodal. 
+                        np.savez(join_paths(saved_path, 'embedding.npz'), save_embedding_npz)
+                        # save json, which contains ISOLD, captions.
                         with open(join_paths(saved_path, 'info.json'), 'w', encoding='utf-8') as f:
-                            json.dump(data, f, indent=4)
+                            json.dump(save_info_json, f, indent=4)
+                            
                     # incorrect trial
                     else:
                         continue

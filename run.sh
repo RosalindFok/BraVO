@@ -27,7 +27,7 @@ function gpus_collection() {
 gpus_collection &
 
 # Execute the example script
-python main.py
+python make_nsd_data.py
 
 # Stop the GPU collection process
 echo "over" >> "${STATE_FILE}"

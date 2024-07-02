@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from PIL import Image
 from lavis.models import load_model_and_preprocess
 
 from utils import bert_base_uncased_dir_path
@@ -23,29 +24,35 @@ def _setup_device_() -> torch.device:
 device = _setup_device_()
 
 class BLIP2_Tools():
-    def __init__(self) -> None:
-        super().__init__()
-        self.model, self.vis_processors, self.txt_processors = load_model_and_preprocess(
+    '''
+    lavis-BLIP2: https://github.com/salesforce/LAVIS/tree/main/projects/blip2
+    '''
+    @staticmethod
+    def blip2_encoder(mode : str = None, image_rgb : np.ndarray = None, caption : str = None) -> torch.Tensor:
+        assert mode in ['multimodal', 'm', 'image', 'i', 'text', 't'], print(f'Invalid mode: {mode}. Please choose from [multimodal, image, text, m, i, t].') 
+        # Load BLIP-2
+        model, vis_processors, txt_processors = load_model_and_preprocess(
                 name="blip2_feature_extractor", model_type="pretrain", is_eval=True, device=device,
                 bert_base_uncased_dir_path = bert_base_uncased_dir_path
             )
-    
-    def multimodal_features(self, image_rgb : np.ndarray, caption : str) -> None:
-        image = self.vis_processors["eval"](image_rgb).unsqueeze(0).to(device)
-        text = self.txt_processors["eval"](caption) 
+        image = vis_processors["eval"](Image.fromarray(image_rgb)).unsqueeze(0).to(device) if image_rgb is not None else None
+        text = txt_processors["eval"](caption) if caption is not None else None
         sample = {"image": image, "text_input": [text]}
-        features_multimodal = self.model.extract_features(sample)
-        print(features_multimodal.multimodal_embeds.shape)
-        # torch.Size([1, 32, 768]), 32 is the number of queries
-
-    # @staticmethod
-    # def unimodal_features(self, mode : str = None) -> None:
-    #     features = self.model.extract_features(self.sample, mode=mode)
         
-    #     print(features.image_embeds.shape)
-    #     # torch.Size([1, 32, 768])
-    #     print(features.text_embeds.shape)
-    #     # torch.Size([1, 12, 768])
+        if mode in ['multimodal', 'm']:
+            assert sample["image"] is not None and sample["text_input"] is not None, print(f'Please provide both image and text inputs.')
+            embedding = model.extract_features(sample).multimodal_embeds
+        elif mode in ['image', 'i']:
+            assert sample["image"] is not None, print(f'Please provide an image input.')
+            embedding = model.extract_features(sample, mode='image').image_embeds
+        elif mode in ['text', 't']:
+            assert sample["text_input"] is not None, print(f'Please provide a text input.')
+            embedding = model.extract_features(sample, mode='text').text_embeds
+        else:
+            raise ValueError(f'Invalid mode: {mode}. Please choose from [multimodal, image, text, m, i, t].') 
+        
+        embedding = torch.squeeze(embedding).mean(dim=0)
+        return embedding # dim=768
 
     # @staticmethod
     # def get_similarity(self, features_image, features_text) -> float:  

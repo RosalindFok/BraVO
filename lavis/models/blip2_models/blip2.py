@@ -32,15 +32,15 @@ class Blip2Base(BaseModel):
         return tokenizer
 
     @classmethod
-    def init_Qformer(cls, num_query_token, vision_width):
-        encoder_config = BertConfig.from_pretrained("bert-base-uncased")
+    def init_Qformer(cls, num_query_token, vision_width, bert_base_uncased_dir_path : str = None):
+        encoder_config = BertConfig.from_pretrained(bert_base_uncased_dir_path)
         encoder_config.encoder_width = vision_width
         # insert cross-attention layer every other block
         encoder_config.add_cross_attention = True
         encoder_config.cross_attention_freq = 2
         encoder_config.query_length = num_query_token
         Qformer = BertLMHeadModel.from_pretrained(
-            "bert-base-uncased", config=encoder_config
+            bert_base_uncased_dir_path, config=encoder_config
         )
 
         query_tokens = nn.Parameter(
