@@ -4,7 +4,6 @@ from torch.utils.data import DataLoader
 from models import device
 from config import configs_dict
 from dataset import NSD_Dataset
-from utils import read_json_file
 
 
 
@@ -30,12 +29,17 @@ def train(
     """
     model.train()
     torch.set_grad_enabled(True)
-    for fmri_data, image_data, info_path in train_dataloader:
+    for fmri_data, image_data, isold, captions_list, image_embedding, caption_embedding, multimodal_embedding in train_dataloader:
         fmri_data  = fmri_data.to(device=device, dtype=torch.float32)
         image_data = image_data.to(device=device, dtype=torch.float32)
-        info_data  = read_json_file(info_path)  # TODO 这个样子是行不通的喔
-        print(info_data)
-
+        image_embedding = image_embedding.to(device=device, dtype=torch.float32)
+        caption_embedding = caption_embedding.to(device=device, dtype=torch.float32)
+        multimodal_embedding = multimodal_embedding.to(device=device, dtype=torch.float32)
+        print(len(isold), len(captions_list))
+        print(type(isold), type(captions_list))
+        print(fmri_data.shape, image_data.shape, image_embedding.shape, caption_embedding.shape, multimodal_embedding.shape)
+        exit(0)
+        
 def test(
     device : torch.device,
     model : torch.nn.Module,
@@ -43,10 +47,10 @@ def test(
 ) -> None:
     model.eval()
     with torch.no_grad():
-        for fmri_data, image_data, info_path in test_dataloader:
-            fmri_data = fmri_data.to(device=device, dtype=torch.float32)
-            image_data = image_data.to(device=device, dtype=torch.float32)
-            info_data = read_json_file(info_path)
+        pass
+        # for fmri_data, image_data, info_path in test_dataloader:
+        #     fmri_data = fmri_data.to(device=device, dtype=torch.float32)
+        #     image_data = image_data.to(device=device, dtype=torch.float32)
 
 def main() -> None:
     # Hyperparameters
@@ -54,7 +58,7 @@ def main() -> None:
 
     # Data
     train_dataloader = DataLoader(NSD_Dataset(subj_id=1, mode='train'), batch_size=batch_size, shuffle=False, num_workers=1)
-    test_dataloader = DataLoader(NSD_Dataset(subj_id=1, mode='test'), batch_size=batch_size, shuffle=False, num_workers=1)
+    test_dataloader = DataLoader(NSD_Dataset(subj_id=1, mode='test'), batch_size=1, shuffle=False, num_workers=1)
     
     # TODO BrainDiVE BrainSCUBA MindDiffuser MindEye
     # TODO Awesome CLIP and BLIP: fMRI、image、caption归约到同一个embedding空间

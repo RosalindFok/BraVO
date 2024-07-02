@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from PIL import Image
+import torch.nn as nn
 from lavis.models import load_model_and_preprocess
 
 from utils import bert_base_uncased_dir_path
@@ -23,39 +23,42 @@ def _setup_device_() -> torch.device:
 
 device = _setup_device_()
 
-class BLIP2_Tools():
-    '''
-    lavis-BLIP2: https://github.com/salesforce/LAVIS/tree/main/projects/blip2
-    '''
-    @staticmethod
-    def blip2_encoder(mode : str = None, image_rgb : np.ndarray = None, caption : str = None) -> torch.Tensor:
-        assert mode in ['multimodal', 'm', 'image', 'i', 'text', 't'], print(f'Invalid mode: {mode}. Please choose from [multimodal, image, text, m, i, t].') 
-        # Load BLIP-2
-        model, vis_processors, txt_processors = load_model_and_preprocess(
+# Load BLIP-2 Module
+BLIP2_model, vis_processors, txt_processors = load_model_and_preprocess(
                 name="blip2_feature_extractor", model_type="pretrain", is_eval=True, device=device,
                 bert_base_uncased_dir_path = bert_base_uncased_dir_path
             )
-        image = vis_processors["eval"](Image.fromarray(image_rgb)).unsqueeze(0).to(device) if image_rgb is not None else None
-        text = txt_processors["eval"](caption) if caption is not None else None
-        sample = {"image": image, "text_input": [text]}
-        
-        if mode in ['multimodal', 'm']:
-            assert sample["image"] is not None and sample["text_input"] is not None, print(f'Please provide both image and text inputs.')
-            embedding = model.extract_features(sample).multimodal_embeds
-        elif mode in ['image', 'i']:
-            assert sample["image"] is not None, print(f'Please provide an image input.')
-            embedding = model.extract_features(sample, mode='image').image_embeds
-        elif mode in ['text', 't']:
-            assert sample["text_input"] is not None, print(f'Please provide a text input.')
-            embedding = model.extract_features(sample, mode='text').text_embeds
-        else:
-            raise ValueError(f'Invalid mode: {mode}. Please choose from [multimodal, image, text, m, i, t].') 
-        
-        embedding = torch.squeeze(embedding).mean(dim=0)
-        return embedding # dim=768
-
     # @staticmethod
     # def get_similarity(self, features_image, features_text) -> float:  
     #     similarity = (features_image.image_embeds_proj @ features_text.text_embeds_proj[:,0,:].t()).max()
     #     print(similarity)
     #     # tensor([[0.3642]])
+
+
+class BraVO_Encoder(nn.Module):
+    """
+    Map the embedding of image or caption, into the brain activity.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+    def brainnetome():
+        pass
+
+    def brain_functional_network():
+        pass
+
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        x = x 
+        return x
+    
+class BraVO_Decoder(nn.Module):
+    """
+    Map the brain activity into the embedding of image or caption.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        x = x 
+        return x

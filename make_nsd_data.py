@@ -3,14 +3,18 @@ import cv2
 import h5py
 import time
 import json
+import torch
 import scipy.io
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from torch.utils.data import DataLoader
 
-from models import BLIP2_Tools
+from dataset import BLIP2_Dataset
+from models import device, BLIP2_model, vis_processors, txt_processors
 from utils import NSD_dir_path, BraVO_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, merge_dicts_if_no_conflict
+
 
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
@@ -191,24 +195,26 @@ class NSD_DATA():
                         cv2.imwrite(join_paths(saved_path, 'image.png'), image)
                         # caption and other infos
                         OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
-                        captions_list = captions_dict[stim_info[KID_73]] # list[str]
+                        captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
 
                         # Encode image and caption via BLIP-2, get embedding whose dim=768
-                        save_info_json = {'ISOLD':'novel' if OLD_flag == 0 else 'old', 'caption':{}}
-                        image_embedding = BLIP2_Tools.blip2_encoder(mode='i', image_rgb=image_rgb)
-                        save_embedding_npz = {'image':image_embedding, 'caption':{}, 'multimodal':{}}
-                        for index, caption in enumerate(captions_list):
-                            caption_embedding = BLIP2_Tools.blip2_encoder(mode='t', caption=caption)
-                            multimodal_embedding = BLIP2_Tools.blip2_encoder(mode='m',image_rgb=image_rgb, caption=caption)
-                            save_embedding_npz['caption'][index] = caption_embedding
-                            save_embedding_npz['multimodal'][index] = multimodal_embedding
-                            save_info_json['caption'][str(index)] = caption
-                        # save npz, which contains embeddings  of image, caption, and multimodal. 
-                        np.savez(join_paths(saved_path, 'embedding.npz'), save_embedding_npz)
-                        # save json, which contains ISOLD, captions.
-                        with open(join_paths(saved_path, 'info.json'), 'w', encoding='utf-8') as f:
-                            json.dump(save_info_json, f, indent=4)
-                            
+                        batch_size = len(captions_list)
+                        BLIP2_Dataloader = DataLoader(BLIP2_Dataset(image_rgb, captions_list, vis_processors, txt_processors, device), batch_size=batch_size, shuffle=False)
+                        for sample in BLIP2_Dataloader:
+                            # dim=(batch_size, num of queries, 768) before Tensor.mean(dim=1)
+                            # dim=(batch_size, 768) after Tensor.mean(dim=1), where batch_size = number of captions of this image
+                            multimodal_embedding = torch.squeeze(BLIP2_model.extract_features(sample).multimodal_embeds.mean(dim=1)).to('cpu')
+                            image_embedding = torch.squeeze(BLIP2_model.extract_features(sample, mode='image').image_embeds.mean(dim=1)).to('cpu')
+                            caption_embedding = torch.squeeze(BLIP2_model.extract_features(sample, mode='text').text_embeds.mean(dim=1)).to('cpu')
+
+                        # Save the embeddings to npz file
+                        save_npz_path = join_paths(saved_path, 'embedding.npz')
+                        np.savez(save_npz_path, image=image_embedding, captions=caption_embedding, multimodal=multimodal_embedding)
+                        
+                        # Save the natural language to json file
+                        save_json_path = join_paths(saved_path, 'info.json')
+                        with open(save_json_path, 'w', encoding='utf-8') as f:
+                            json.dump({'isold':'novel' if OLD_flag == 0 else 'old','captions':captions_list}, f, indent=4)
                     # incorrect trial
                     else:
                         continue
@@ -217,7 +223,4 @@ class NSD_DATA():
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
 
 # make pairs of NSD
-NSD_DATA(subj_id=1)        
-NSD_DATA(subj_id=2)        
-NSD_DATA(subj_id=5)        
-NSD_DATA(subj_id=7)        
+NSD_DATA(subj_id=1)  # 1 2 5 7      

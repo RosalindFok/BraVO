@@ -57,7 +57,7 @@ pip install opencv-python -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Success
 ```
 
 **Step 1:**
-run `python make_nsd_data.py`  for subj 01, 02, 05, 07
+run `dsub -s step1_run.sh`  for subj 01, 02, 05, 07
 
 **Step 2:**
 
