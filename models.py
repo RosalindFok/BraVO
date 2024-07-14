@@ -5,8 +5,11 @@ from lavis.models import load_model_and_preprocess
 
 from utils import bert_base_uncased_dir_path
 
-__all__ = ['device', 
-           'BLIP2_Tools']
+__all__ = [
+    'device', 
+    'BLIP2_Encoder_model', 'vis_processors', 'txt_processors',
+    'BraVO_Encoder', 'BraVO_Decoder'
+]
 
 def _setup_device_() -> torch.device:
     """
@@ -24,16 +27,53 @@ def _setup_device_() -> torch.device:
 device = _setup_device_()
 
 # Load BLIP-2 Module
-BLIP2_model, vis_processors, txt_processors = load_model_and_preprocess(
-                name="blip2_feature_extractor", model_type="pretrain", is_eval=True, device=device,
+BLIP2_Encoder_model, vis_processors, txt_processors = load_model_and_preprocess(
+                name="blip2_feature_extractor", 
+                model_type="pretrain", 
+                is_eval=True, device=device,
                 bert_base_uncased_dir_path = bert_base_uncased_dir_path
             )
-    # @staticmethod
-    # def get_similarity(self, features_image, features_text) -> float:  
-    #     similarity = (features_image.image_embeds_proj @ features_text.text_embeds_proj[:,0,:].t()).max()
-    #     print(similarity)
-    #     # tensor([[0.3642]])
 
+blip_diffusion_model, vis_preprocess, txt_preprocess = load_model_and_preprocess(
+                name="blip_diffusion", 
+                model_type="base", 
+                is_eval=True, 
+                device=device,
+                bert_base_uncased_dir_path = bert_base_uncased_dir_path
+            )
+
+class Average_Embedding(nn.Module):
+    """
+    Input: caption_embedding or multimodal_embedding, whose shape is (batch_size, k, 768), k = number of captions of the corresponding image.
+    Output: the average embedding
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        # k = 1
+        # k >= 1
+        x = x.mean(dim=1)
+
+        return x
+
+
+class MaxSimilarty_Embedding(nn.Module):
+    """
+    Input: image_embedding, whose shape is (batch_size, 768).
+    Input: caption_embedding or multimodal_embedding, whose shape is (batch_size, k, 768), k = number of captions of the corresponding image.
+    Output: the embedding with the highest similarity with the image_embedding.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        # k = 1
+        # similarity = (features_image.image_embeds_proj @ features_text.text_embeds_proj[:,0,:].t()).max()
+
+        # k >= 1
+        
+        return x
+    
 
 class BraVO_Encoder(nn.Module):
     """

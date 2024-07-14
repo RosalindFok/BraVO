@@ -1,10 +1,9 @@
 import torch
 from torch.utils.data import DataLoader
 
-from models import device
 from config import configs_dict
-from dataset import NSD_Dataset
-
+from dataset import make_paths_dict, NSD_Dataset
+from models import device, BraVO_Decoder, BraVO_Encoder#, blip_diffusion_model
 
 
 def train(
@@ -29,16 +28,14 @@ def train(
     """
     model.train()
     torch.set_grad_enabled(True)
-    for fmri_data, image_data, isold, captions_list, image_embedding, caption_embedding, multimodal_embedding in train_dataloader:
-        fmri_data  = fmri_data.to(device=device, dtype=torch.float32)
-        image_data = image_data.to(device=device, dtype=torch.float32)
-        image_embedding = image_embedding.to(device=device, dtype=torch.float32)
-        caption_embedding = caption_embedding.to(device=device, dtype=torch.float32)
-        multimodal_embedding = multimodal_embedding.to(device=device, dtype=torch.float32)
-        print(len(isold), len(captions_list))
-        print(type(isold), type(captions_list))
-        print(fmri_data.shape, image_data.shape, image_embedding.shape, caption_embedding.shape, multimodal_embedding.shape)
-        exit(0)
+    for index, fmri_data, image_data, image_embedding, caption_embedding, multimodal_embedding in train_dataloader:
+        # Load data to device and set the dtype as float32
+        tensors = [fmri_data, image_data, image_embedding, caption_embedding, multimodal_embedding]
+        tensors = list(map(lambda t: t.to(device=device, dtype=torch.float32), tensors))
+        fmri_data, image_data, image_embedding, caption_embedding, multimodal_embedding = tensors
+        # Forward
+
+    return model
         
 def test(
     device : torch.device,
@@ -47,37 +44,88 @@ def test(
 ) -> None:
     model.eval()
     with torch.no_grad():
-        pass
-        # for fmri_data, image_data, info_path in test_dataloader:
-        #     fmri_data = fmri_data.to(device=device, dtype=torch.float32)
-        #     image_data = image_data.to(device=device, dtype=torch.float32)
+        for index, fmri_data, image_data, image_embedding, caption_embedding, multimodal_embedding in test_dataloader:
+            # Load data to device and set the dtype as float32
+            tensors = [fmri_data, image_data, image_embedding, caption_embedding, multimodal_embedding]
+            tensors = list(map(lambda t: t.to(device=device, dtype=torch.float32), tensors))
+            fmri_data, image_data, image_embedding, caption_embedding, multimodal_embedding = tensors
+            
+
+
 
 def main() -> None:
     # Hyperparameters
     batch_size = configs_dict['batch_size']
+    subj_id = configs_dict['subj_id']
+
+    # 测试 TODO blip_diffusion set
+    # https://github.com/salesforce/LAVIS/tree/main/projects/blip-diffusion
+    from utils import join_paths
+    from PIL import Image
+    from models import blip_diffusion_model, vis_preprocess, txt_preprocess
+    cond_image = Image.open(join_paths('..','BraVO_saved','subj01_pairs','test','session01_run01_trial01','image.png')).convert("RGB")
+    cond_images = vis_preprocess["eval"](cond_image).unsqueeze(0).cuda()
+    iter_seed = 88888
+    guidance_scale = 7.5
+    num_inference_steps = 50
+    negative_prompt = "over-exposure, under-exposure, saturated, duplicate, out of frame, lowres, cropped, worst quality, low quality, jpeg artifacts, morbid, mutilated, out of frame, ugly, bad anatomy, bad proportions, deformed, blurry, duplicate"
+    cond_subjects = [txt_preprocess["eval"]('cows')]
+    tgt_subjects = [txt_preprocess["eval"]('cows')]
+    captions = [
+        "White cows eating grass under trees and the sky",
+        "Many cows in a pasture with trees eating grass.",
+        "A herd of cows graze on a field of sparse grass.",
+        "a herd of white cows grazing on brush among the trees",
+        "A herd of mostly white cows in a field with some trees."
+    ]
+    for idx, caption in enumerate(captions):
+        text_prompt = [txt_preprocess["eval"](caption)]
+        samples = {
+            "cond_images": cond_images,
+            "cond_subject": cond_subjects,
+            "tgt_subject": tgt_subjects,
+            "prompt": text_prompt,
+        }
+        output = blip_diffusion_model.generate(
+            samples,
+            seed=iter_seed,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            neg_prompt=negative_prompt,
+            height=512,
+            width=512,
+        )
+        output[0].save(f"output_{idx}.png")
+    
+
+    # TODO 测试 https://github.com/SHI-Labs/Versatile-Diffusion
+
+    # TODO 关注 https://arxiv.org/pdf/2311.00265
+
+    # TODO DiT facebook DiT  https://github.com/facebookresearch/DiT
+
+    # MMDiT
+    exit(0)
 
     # Data
-    train_dataloader = DataLoader(NSD_Dataset(subj_id=1, mode='train'), batch_size=batch_size, shuffle=False, num_workers=1)
-    test_dataloader = DataLoader(NSD_Dataset(subj_id=1, mode='test'), batch_size=1, shuffle=False, num_workers=1)
+    train_paths_dict = make_paths_dict(subj_id=subj_id, mode='train')
+    test_paths_dict = make_paths_dict(subj_id=subj_id, mode='test')
+    train_dataloader = DataLoader(NSD_Dataset(train_paths_dict), batch_size=batch_size, shuffle=False, num_workers=6)
+    test_dataloader = DataLoader(NSD_Dataset(test_paths_dict), batch_size=batch_size, shuffle=False, num_workers=6)
     
-    # TODO BrainDiVE BrainSCUBA MindDiffuser MindEye
-    # TODO Awesome CLIP and BLIP: fMRI、image、caption归约到同一个embedding空间
-    # 这个太老了 看有没有新的 https://github.com/yzhuoning/Awesome-CLIP
-    # TODO DiT系列生成模型 优先试试MDTv2  这两个都是ImageNet上的预训练模型啊啊啊
-    # Scalable Diffusion Models with Transformers
-    # https://github.com/facebookresearch/DiT
-    # MDTv2    在DiT的基础上，引入了mask latent modeling，进一步提升了DiT的收敛速度和生成效果。
-    # https://github.com/sail-sg/MDT
+    # TODO https://github.com/salesforce/LAVIS/tree/main/projects/blip-diffusion
+    # BLIP-Diffusion: Pre-trained Subject Representation for Controllable Text-to-Image Generation and Editing
     
     # Network
-    model = None
+    model = BraVO_Encoder()
 
     # Loss function
 
     # Train
-    model = train(device=device, model=model, loss_fn=None, optimizer=None, train_dataloader=train_dataloader)
+    trained_model = train(device=device, model=model, loss_fn=None, optimizer=None, train_dataloader=train_dataloader)
 
-    # Test
+    # Test TODO just test blip_diffusion_model
+    test(device=device, model=blip_diffusion_model, test_dataloader=test_dataloader)
 
 if __name__ == '__main__':
     main()

@@ -6,6 +6,7 @@
 """
 
 import logging
+import torch
 from omegaconf import OmegaConf
 from lavis.common.registry import registry
 
@@ -36,6 +37,12 @@ from lavis.models.blip2_models.blip2_t5 import Blip2T5
 from lavis.models.blip2_models.blip2_qformer import Blip2Qformer
 from lavis.models.blip2_models.blip2_image_text_matching import Blip2ITM
 
+from lavis.models.blip2_models.blip2_t5_instruct import Blip2T5Instruct
+from lavis.models.blip2_models.blip2_vicuna_instruct import Blip2VicunaInstruct
+from lavis.models.blip2_models.blip2_vicuna_xinstruct import Blip2VicunaXInstruct
+
+from lavis.models.blip_diffusion_models.blip_diffusion import BlipDiffusion
+
 from lavis.models.pnp_vqa_models.pnp_vqa import PNPVQA
 from lavis.models.pnp_vqa_models.pnp_unifiedqav2_fid import PNPUnifiedQAv2FiD
 from lavis.models.img2prompt_models.img2prompt_vqa import Img2PromptVQA
@@ -63,6 +70,7 @@ __all__ = [
     "BlipFeatureExtractor",
     "BlipCaption",
     "BlipClassification",
+    "BlipDiffusion",
     "BlipITM",
     "BlipNLVR",
     "BlipPretrain",
@@ -73,6 +81,9 @@ __all__ = [
     "Blip2ITM",
     "Blip2OPT",
     "Blip2T5",
+    "Blip2T5Instruct",
+    "Blip2VicunaInstruct",
+    "Blip2VicunaXInstruct",
     "PNPVQA",
     "Img2PromptVQA",
     "PNPUnifiedQAv2FiD",
@@ -169,7 +180,7 @@ def load_preprocess(config):
     return vis_processors, txt_processors
 
 
-def load_model_and_preprocess(name, model_type, is_eval=False, device="cpu", bert_base_uncased_dir_path : str = None):
+def load_model_and_preprocess(name, model_type, is_eval=False, device="cpu",bert_base_uncased_dir_path=None):
     """
     Load model and its related preprocessors.
 
@@ -191,7 +202,8 @@ def load_model_and_preprocess(name, model_type, is_eval=False, device="cpu", ber
     model_cls = registry.get_model_class(name)
 
     # load model
-    model = model_cls.from_pretrained(model_type=model_type, bert_base_uncased_dir_path=bert_base_uncased_dir_path)
+    assert bert_base_uncased_dir_path is not None
+    model = model_cls.from_pretrained(model_type=model_type,bert_base_uncased_dir_path=bert_base_uncased_dir_path)
 
     if is_eval:
         model.eval()
@@ -211,7 +223,7 @@ def load_model_and_preprocess(name, model_type, is_eval=False, device="cpu", ber
             """
         )
 
-    if device == "cpu":
+    if device == "cpu" or device == torch.device("cpu"):
         model = model.float()
 
     return model.to(device), vis_processors, txt_processors

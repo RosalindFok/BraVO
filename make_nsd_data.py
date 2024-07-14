@@ -1,5 +1,4 @@
 import os
-import cv2
 import h5py
 import time
 import json
@@ -8,10 +7,11 @@ import scipy.io
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from PIL import Image
 from torch.utils.data import DataLoader
 
 from dataset import BLIP2_Dataset
-from models import device, BLIP2_model, vis_processors, txt_processors
+from models import device, BLIP2_Encoder_model, vis_processors, txt_processors
 from utils import NSD_dir_path, BraVO_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, merge_dicts_if_no_conflict
 
@@ -189,35 +189,45 @@ class NSD_DATA():
 
                         # fMRI
                         save_nii_file(fmri, join_paths(saved_path, 'fmri.nii.gz'))
-                        # image: opencv writes via BGR, BLIP-2 encodes via RGB
-                        image = cv2.cvtColor(imgBrick[KID_73], cv2.COLOR_RGB2BGR)
-                        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                        cv2.imwrite(join_paths(saved_path, 'image.png'), image)
+                        # image: BLIP-2 encodes via RGB
+                        image = Image.fromarray(imgBrick[KID_73])
+                        image.save(join_paths(saved_path, 'image.png'))
+
                         # caption and other infos
                         OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
                         captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
 
                         # Encode image and caption via BLIP-2, get embedding whose dim=768
                         batch_size = len(captions_list)
-                        BLIP2_Dataloader = DataLoader(BLIP2_Dataset(image_rgb, captions_list, vis_processors, txt_processors, device), batch_size=batch_size, shuffle=False)
+                        BLIP2_Dataloader = DataLoader(BLIP2_Dataset(image, captions_list, vis_processors, txt_processors, device), batch_size=batch_size, shuffle=False)
                         for sample in BLIP2_Dataloader:
                             # dim=(batch_size, num of queries, 768) before Tensor.mean(dim=1)
                             # dim=(batch_size, 768) after Tensor.mean(dim=1), where batch_size = number of captions of this image
-                            multimodal_embedding = torch.squeeze(BLIP2_model.extract_features(sample).multimodal_embeds.mean(dim=1)).to('cpu')
-                            image_embedding = torch.squeeze(BLIP2_model.extract_features(sample, mode='image').image_embeds.mean(dim=1)).to('cpu')
-                            caption_embedding = torch.squeeze(BLIP2_model.extract_features(sample, mode='text').text_embeds.mean(dim=1)).to('cpu')
+                            multimodal_embedding = torch.squeeze(BLIP2_Encoder_model.extract_features(sample).multimodal_embeds.mean(dim=1)).to('cpu')
+                            image_embedding = torch.squeeze(BLIP2_Encoder_model.extract_features(sample, mode='image').image_embeds.mean(dim=1)).to('cpu')
+                            caption_embedding = torch.squeeze(BLIP2_Encoder_model.extract_features(sample, mode='text').text_embeds.mean(dim=1)).to('cpu')
 
-                        # Save the embeddings to npz file
+                        # Save the embeddings and information to npz file
                         save_npz_path = join_paths(saved_path, 'embedding.npz')
-                        np.savez(save_npz_path, image=image_embedding, captions=caption_embedding, multimodal=multimodal_embedding)
+                        np.savez(
+                            save_npz_path, 
+                            image_embedding=image_embedding.numpy(), # numpy
+                            captions_embedding=caption_embedding.numpy(), # numpy
+                            multimodal_embedding=multimodal_embedding.numpy(), # numpy
+                        )
                         
-                        # Save the natural language to json file
-                        save_json_path = join_paths(saved_path, 'info.json')
-                        with open(save_json_path, 'w', encoding='utf-8') as f:
-                            json.dump({'isold':'novel' if OLD_flag == 0 else 'old','captions':captions_list}, f, indent=4)
+                        # Save the strings to json file
+                        json_data = {
+                            'isold' : 'novel' if OLD_flag == 0 else 'old', # str
+                            'captions_list' : captions_list # list[str]
+                        }
+                        with open(join_paths(saved_path, 'strings.json'), 'w', encoding='utf-8') as json_file:
+                            json.dump(json_data, json_file, indent=4, ensure_ascii=False)
+
                     # incorrect trial
                     else:
                         continue
+
             else:
                 raise NotImplementedError(f'Space type: {space_type} is not supported.')
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')

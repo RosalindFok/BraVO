@@ -56,5 +56,6 @@ NSD_dir_path = join_paths('..', 'dataset', 'NSD')
 BraVO_saved_dir_path = join_paths('..', 'BraVO_saved')
 check_and_make_dirs(BraVO_saved_dir_path)
 
-large_files_for_BraVO_dir_path = join_paths(os.getcwd(), '..', 'large_files_for_BraVO')
-bert_base_uncased_dir_path = join_paths(large_files_for_BraVO_dir_path, 'bert-base-uncased')
+large_files_for_BraVO_dir_path = join_paths('..', 'large_files_for_BraVO')
+bert_base_uncased_dir_path = os.path.abspath(join_paths(large_files_for_BraVO_dir_path, 'bert-base-uncased'))
+assert os.path.exists(bert_base_uncased_dir_path), print(f'Error: {bert_base_uncased_dir_path} does not exist.')
