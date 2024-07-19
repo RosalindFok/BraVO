@@ -146,7 +146,7 @@ class BaseEncoder(nn.Module):
 
     def __init__(self):
         super().__init__()
-
+ 
     def forward_features(self, samples, **kwargs):
         raise NotImplementedError
 

@@ -11,10 +11,11 @@ from PIL import Image
 from torch.utils.data import DataLoader
 
 from dataset import BLIP2_Dataset
-from models import device, BLIP2_Encoder_model, vis_processors, txt_processors
+from models import device, load_blip_models
 from utils import NSD_dir_path, BraVO_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, merge_dicts_if_no_conflict
 
+BLIP2_Encoder_model, vis_processors, txt_processors = load_blip_models(mode = 'encoder')
 
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
@@ -114,17 +115,33 @@ class NSD_DATA():
         print(f'It took {end_time - start_time:.2f} seconds to read {self.nsddata_stimuli_hdf5_file_path}.')
         return imgBrick
     
-    def read_coco_annotation(self) -> dict[int, list[str]]:
+    def read_coco_annotation(self) -> tuple[dict[int, list[str]], dict[int, list[str]]]:
         def __extract_captions__(captions_annotations : list[dict[str, any]]) -> dict[int, list[str]]:
             annotations = {} # {key=id : value=[caption1, caption2, ...]}
             # some pictures have multiple captions
             for ca in captions_annotations:
                 if not ca['image_id'] in annotations:
-                    annotations[ca['image_id']] = [ca['caption']]
+                    annotations[ca['image_id']] = [ca['caption']] 
                 else:
                     annotations[ca['image_id']].append(ca['caption'])
             return annotations
         
+        def __extract_categories__(annotations_list : list[dict[str, any]], categories_list : list[dict[str, any]]) -> dict[int, list[dict[str, any]]]:
+            categories_dict = {}
+            for categories in categories_list:
+                categories_dict[categories['id']] = {'supercategory':categories['supercategory'], 'name':categories['name']}
+            instances_category = {}
+            for annotation in annotations_list:
+                category_id = annotation['category_id']
+                value = {'supercategory':categories_dict[category_id]['supercategory'], 'name':categories_dict[category_id]['name'], 'area':annotation['area']}
+                if not annotation['image_id'] in instances_category:
+                    instances_category[annotation['image_id']] = [value]
+                else:
+                    instances_category[annotation['image_id']].append(value)
+            return instances_category
+
+        start_time = time.time()
+        # captions
         captions_train2017 = read_json_file(path=join_paths(self.coco_annotation_dir_path, 'captions_train2017.json'))
         captions_val2017 = read_json_file(path=join_paths(self.coco_annotation_dir_path, 'captions_val2017.json'))
         captions_train_annotations = captions_train2017['annotations']
@@ -133,10 +150,27 @@ class NSD_DATA():
         val_annotations = __extract_captions__(captions_val_annotations)
         # captions_dict is {key=id : value=[caption1, caption2, ...]}
         captions_dict = merge_dicts_if_no_conflict(train_annotations, val_annotations) 
+
+        # categories
+        instances_train2017 = read_json_file(path=join_paths(self.coco_annotation_dir_path, 'instances_train2017.json'))
+        instances_val2017 = read_json_file(path=join_paths(self.coco_annotation_dir_path, 'instances_val2017.json'))
+        annotations_train2017 = instances_train2017['annotations']
+        annotations_val2017 = instances_val2017['annotations']
+        categories_train2017 = instances_train2017['categories']
+        categories_val2017 = instances_val2017['categories']
+        train_categories = __extract_categories__(annotations_train2017, categories_train2017)
+        val_categories = __extract_categories__(annotations_val2017, categories_val2017)
+        # categories_dict is {key=id : value={supercategory, name}}
+        categories_dict = merge_dicts_if_no_conflict(train_categories, val_categories)
         
-        return captions_dict
+        end_time = time.time()
+        print(f'It took {end_time - start_time:.2f} seconds to read {self.coco_annotation_dir_path}.')
+        return captions_dict, categories_dict
     
     def make_pairs(self) -> None:
+        """
+        fMRI <--> image <--> text
+        """        
         ## behav_responses_tsv
         responses = self.read_behav_responses_tsv()
         first_row = responses.iloc[0]
@@ -159,7 +193,7 @@ class NSD_DATA():
         imgBrick = self.read_stimuli_hdf5()
 
         ## captsions and instances of COCO
-        captions_dict = self.read_coco_annotation()
+        captions_dict, categories_dict = self.read_coco_annotation()
         
         train_saved_dir_path = join_paths(self.subject_saved_dir_path, 'train')
         test_saved_dir_path = join_paths(self.subject_saved_dir_path, 'test')
@@ -196,7 +230,7 @@ class NSD_DATA():
                         # caption and other infos
                         OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
                         captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
-
+                        category_list = categories_dict[stim_info[KID_73]] # list[dict[str, any]], [{'supercategory', 'name', 'area}]
                         # Encode image and caption via BLIP-2, get embedding whose dim=768
                         batch_size = len(captions_list)
                         BLIP2_Dataloader = DataLoader(BLIP2_Dataset(image, captions_list, vis_processors, txt_processors, device), batch_size=batch_size, shuffle=False)
@@ -219,7 +253,8 @@ class NSD_DATA():
                         # Save the strings to json file
                         json_data = {
                             'isold' : 'novel' if OLD_flag == 0 else 'old', # str
-                            'captions_list' : captions_list # list[str]
+                            'captions_list' : captions_list, # list[str]
+                            'instances_category' : category_list
                         }
                         with open(join_paths(saved_path, 'strings.json'), 'w', encoding='utf-8') as json_file:
                             json.dump(json_data, json_file, indent=4, ensure_ascii=False)

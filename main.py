@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 
 from config import configs_dict
 from dataset import make_paths_dict, NSD_Dataset
-from models import device, BraVO_Decoder, BraVO_Encoder#, blip_diffusion_model
+from models import device, BraVO_Decoder, BraVO_Encoder, load_blip_models
 
 
 def train(
@@ -62,7 +62,7 @@ def main() -> None:
     # https://github.com/salesforce/LAVIS/tree/main/projects/blip-diffusion
     from utils import join_paths
     from PIL import Image
-    from models import blip_diffusion_model, vis_preprocess, txt_preprocess
+    blip_diffusion_model, vis_preprocess, txt_preprocess = load_blip_models(mode = 'diffusion')
     cond_image = Image.open(join_paths('..','BraVO_saved','subj01_pairs','test','session01_run01_trial01','image.png')).convert("RGB")
     cond_images = vis_preprocess["eval"](cond_image).unsqueeze(0).cuda()
     iter_seed = 88888
@@ -98,11 +98,7 @@ def main() -> None:
         output[0].save(f"output_{idx}.png")
     
 
-    # TODO 测试 https://github.com/SHI-Labs/Versatile-Diffusion
-
-    # TODO 关注 https://arxiv.org/pdf/2311.00265
-
-    # TODO DiT facebook DiT  https://github.com/facebookresearch/DiT
+    # TODO DiT facebook DiT  https://github.com/facebookresearch/DiT    有没有two guided的DiT 或者学习人家blip-diffusion把图像+文本来生成一个text embedding
 
     # MMDiT
     exit(0)

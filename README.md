@@ -74,7 +74,7 @@ Download files from `https://hf-mirror.com/runwayml/stable-diffusion-v1-5/tree/m
 3. blip-diffusion
 Download tar.gz from `https://storage.googleapis.com/sfr-vision-language-research/LAVIS/models/BLIP-Diffusion/blip-diffusion.tar.gz`, untar it and put the whole folder under `../large_files_for_BraVO/blip-diffusion`  <br>
 
-1. [The Natural Scenes Dataset(NSD)](https://naturalscenesdataset.org/)
+4. [The Natural Scenes Dataset(NSD)](https://naturalscenesdataset.org/)
 > Allen, E.J., St-Yves, G., Wu, Y., Breedlove, J.L., Prince, J.S., Dowdle, L.T., Nau, M., Caron, B., Pestilli, F., Charest, I., Hutchinson, J.B., Naselaris, T.*, Kay, K.* A massive 7T fMRI dataset to bridge cognitive neuroscience and artificial intelligence. Nature Neuroscience (2021).
 **Note:**
 - Full data: subj01, subj02, subj05, subj07
@@ -82,7 +82,7 @@ Download tar.gz from `https://storage.googleapis.com/sfr-vision-language-researc
 - [NSD Data Manual](https://cvnlab.slite.page/p/CT9Fwl4_hc/NSD-Data-Manual)
 
 1. **Step 1:**
-run `sbatch --gpus=1 -p gpu step1_run.sh`  for subj 01, 02, 05, 07
+run `sbatch --gpus=2 -p gpu step1_run.sh`  for subj 01, 02, 05, 07
 
 **Step 2:**
 run `sbatch --gpus=1 -p gpu step2_run.sh`

@@ -72,7 +72,7 @@ class BlipDiffusion(BaseModel):
         qformer_cross_attention_freq=1,
         qformer_pretrained_path=None,
         qformer_train=False,
-        sd_pretrained_model_name_or_path="../large_files_for_BraVO/stable-diffusion-v1-5",
+        sd_pretrained_model_name_or_path=os.path.abspath(os.path.join('..','large_files_for_BraVO','stable-diffusion-v1-5')),
         sd_train_text_encoder=False,
         controlnet_pretrained_model_name_or_path=None,
         vae_half_precision=False,
@@ -952,7 +952,6 @@ class BlipDiffusion(BaseModel):
         return model
 
     def load_checkpoint_from_dir(self, checkpoint_dir_or_url):
-        print(f'checkpoint_dir_or_url = {checkpoint_dir_or_url}')
         # if checkpoint_dir is a url, download it and untar it
         assert is_url(checkpoint_dir_or_url) == False, print('You are not able to download within GFW!')
         if is_url(checkpoint_dir_or_url):

@@ -1,13 +1,12 @@
+import time
 import torch
-import numpy as np
 import torch.nn as nn
-from lavis.models import load_model_and_preprocess
-
 from utils import bert_base_uncased_dir_path
+from lavis.models import load_model_and_preprocess
 
 __all__ = [
     'device', 
-    'BLIP2_Encoder_model', 'vis_processors', 'txt_processors',
+    'load_blip_models',
     'BraVO_Encoder', 'BraVO_Decoder'
 ]
 
@@ -27,20 +26,30 @@ def _setup_device_() -> torch.device:
 device = _setup_device_()
 
 # Load BLIP-2 Module
-BLIP2_Encoder_model, vis_processors, txt_processors = load_model_and_preprocess(
+def load_blip_models(mode : str) -> tuple[torch.nn.Module, dict, dict]:
+    start_time = time.time()
+    if mode == 'encoder':
+        model, vis_processors, txt_processors = load_model_and_preprocess(
                 name="blip2_feature_extractor", 
-                model_type="pretrain", 
-                is_eval=True, device=device,
+                model_type="coco", # Go to blip2_qformer.py to see model types
+                is_eval=True, 
+                device=device,
                 bert_base_uncased_dir_path = bert_base_uncased_dir_path
             )
-
-blip_diffusion_model, vis_preprocess, txt_preprocess = load_model_and_preprocess(
-                name="blip_diffusion", 
+    elif mode == 'diffusion':
+        model, vis_processors, txt_processors = load_model_and_preprocess(
+                name="blip_diffusion", # class BlipDiffusion(BaseModel)
                 model_type="base", 
                 is_eval=True, 
                 device=device,
                 bert_base_uncased_dir_path = bert_base_uncased_dir_path
             )
+    else:
+        raise ValueError(f"Invalid mode: {mode}.")  
+    
+    end_time = time.time()
+    print(f'It took {end_time - start_time:.2f} seconds to load the BLIP-2 model {mode}.')
+    return model, vis_processors, txt_processors
 
 class Average_Embedding(nn.Module):
     """

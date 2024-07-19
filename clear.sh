@@ -13,7 +13,7 @@ rm state_.log || true
 
 rm slurm-*.out || true
 
-rm -rf __pycache__ || true
+find ./ -type d -name '__pycache__' -exec rm -rf {} \; || true
 
 set +e
 trap - ERR
