@@ -77,7 +77,7 @@ class BasicConvBlock(nn.Module):
         """Forward function."""
 
         if self.with_cp and x.requires_grad:
-            out = cp.checkpoint(self.convs, x)
+            out = cp.checkpoint(self.convs, x, use_reentrant=False)
         else:
             out = self.convs(x)
         return out
@@ -138,7 +138,7 @@ class DeconvModule(nn.Module):
         """Forward function."""
 
         if self.with_cp and x.requires_grad:
-            out = cp.checkpoint(self.deconv_upsamping, x)
+            out = cp.checkpoint(self.deconv_upsamping, x, use_reentrant=False)
         else:
             out = self.deconv_upsamping(x)
         return out
@@ -212,7 +212,7 @@ class InterpConv(nn.Module):
         """Forward function."""
 
         if self.with_cp and x.requires_grad:
-            out = cp.checkpoint(self.interp_upsample, x)
+            out = cp.checkpoint(self.interp_upsample, x, use_reentrant=False)
         else:
             out = self.interp_upsample(x)
         return out

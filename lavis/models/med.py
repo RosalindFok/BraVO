@@ -587,6 +587,7 @@ class BertEncoder(nn.Module):
                     encoder_hidden_states,
                     encoder_attention_mask,
                     mode=mode,
+                    use_reentrant=False
                 )
             else:
                 layer_outputs = layer_module(
@@ -1309,7 +1310,7 @@ class XBertLMHeadDecoder(BertLMHeadModel):
         med_config = BertConfig.from_json_file(med_config_path)
 
         if from_pretrained:
-            return cls.from_pretrained("bert-base-uncased", config=med_config)
+            return cls.from_pretrained(os.path.abspath(os.path.join('..', 'large_files_for_BraVO', 'bert-base-uncased')), config=med_config)
         else:
             return cls(config=med_config)
 
@@ -1380,7 +1381,7 @@ class XBertEncoder(BertModel, BaseEncoder):
 
         if from_pretrained:
             return cls.from_pretrained(
-                "bert-base-uncased", config=med_config, add_pooling_layer=False
+                os.path.abspath(os.path.join('..', 'large_files_for_BraVO', 'bert-base-uncased')), config=med_config, add_pooling_layer=False
             )
         else:
             return cls(config=med_config, add_pooling_layer=False)

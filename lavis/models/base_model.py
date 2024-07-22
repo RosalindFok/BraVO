@@ -56,7 +56,7 @@ class BaseModel(nn.Module):
         return msg
 
     @classmethod
-    def from_pretrained(cls, model_type,bert_base_uncased_dir_path=None):
+    def from_pretrained(cls, model_type):
         """
         Build a pretrained model from default configuration file, specified by model_type.
 
@@ -67,8 +67,7 @@ class BaseModel(nn.Module):
             - model (nn.Module): pretrained or finetuned model, depending on the configuration.
         """
         model_cfg = OmegaConf.load(cls.default_config_path(model_type)).model
-        assert bert_base_uncased_dir_path is not None, "bert_base_uncased_dir_path is not provided"
-        model = cls.from_config(model_cfg,bert_base_uncased_dir_path=bert_base_uncased_dir_path)
+        model = cls.from_config(model_cfg)
 
         return model
 
@@ -146,7 +145,7 @@ class BaseEncoder(nn.Module):
 
     def __init__(self):
         super().__init__()
- 
+
     def forward_features(self, samples, **kwargs):
         raise NotImplementedError
 

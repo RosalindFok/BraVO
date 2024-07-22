@@ -1,7 +1,6 @@
 import time
 import torch
 import torch.nn as nn
-from utils import bert_base_uncased_dir_path
 from lavis.models import load_model_and_preprocess
 
 __all__ = [
@@ -33,16 +32,14 @@ def load_blip_models(mode : str) -> tuple[torch.nn.Module, dict, dict]:
                 name="blip2_feature_extractor", 
                 model_type="coco", # Go to blip2_qformer.py to see model types
                 is_eval=True, 
-                device=device,
-                bert_base_uncased_dir_path = bert_base_uncased_dir_path
+                device=device
             )
     elif mode == 'diffusion':
         model, vis_processors, txt_processors = load_model_and_preprocess(
                 name="blip_diffusion", # class BlipDiffusion(BaseModel)
                 model_type="base", 
                 is_eval=True, 
-                device=device,
-                bert_base_uncased_dir_path = bert_base_uncased_dir_path
+                device=device
             )
     else:
         raise ValueError(f"Invalid mode: {mode}.")  

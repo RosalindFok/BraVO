@@ -355,7 +355,7 @@ class AlbefVQA(AlbefBase, MomentumDistilationMixin):
         config_decoder.fusion_layer = 0
         config_decoder.num_hidden_layers = 6
         text_decoder = BertLMHeadModel.from_pretrained(
-            "bert-base-uncased", config=config_decoder
+            os.path.abspath(os.path.join('..', 'large_files_for_BraVO', 'bert-base-uncased')), config=config_decoder
         )
 
         alpha = cfg.get("alpha", 0.4)

@@ -8,6 +8,7 @@ Encoding(编码): Scientific issues, visual stimulation $\rightarrow$ neural act
 ## Platform
 Beijing Super Cloud Computing Center - N32EA14P: `NVIDIA A100-PCIE-40GB*8`
 ``` shell
+chmod 777 run.sh
 sbatch --gpus=num_gpus -p gpu run.sh # submit the job
 parajobs # check id of the job
 scancel job_id # cancel the job via its id

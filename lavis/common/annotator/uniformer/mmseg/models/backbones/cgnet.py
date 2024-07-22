@@ -43,7 +43,7 @@ class GlobalContextExtractor(nn.Module):
             return x * y
 
         if self.with_cp and x.requires_grad:
-            out = cp.checkpoint(_inner_forward, x)
+            out = cp.checkpoint(_inner_forward, x, use_reentrant=False)
         else:
             out = _inner_forward(x)
 
@@ -160,7 +160,7 @@ class ContextGuidedBlock(nn.Module):
                 return out
 
         if self.with_cp and x.requires_grad:
-            out = cp.checkpoint(_inner_forward, x)
+            out = cp.checkpoint(_inner_forward, x, use_reentrant=False)
         else:
             out = _inner_forward(x)
 

@@ -386,7 +386,7 @@ class UniFormer(nn.Module):
         x = self.pos_drop(x)
         for i, blk in enumerate(self.blocks1):
             if self.use_checkpoint and i < self.checkpoint_num[0]:
-                x = checkpoint.checkpoint(blk, x)
+                x = checkpoint.checkpoint(blk, x, use_reentrant=False)
             else:
                 x = blk(x)
         x_out = self.norm1(x.permute(0, 2, 3, 1))
@@ -394,7 +394,7 @@ class UniFormer(nn.Module):
         x = self.patch_embed2(x)
         for i, blk in enumerate(self.blocks2):
             if self.use_checkpoint and i < self.checkpoint_num[1]:
-                x = checkpoint.checkpoint(blk, x)
+                x = checkpoint.checkpoint(blk, x, use_reentrant=False)
             else:
                 x = blk(x)
         x_out = self.norm2(x.permute(0, 2, 3, 1))
@@ -402,7 +402,7 @@ class UniFormer(nn.Module):
         x = self.patch_embed3(x)
         for i, blk in enumerate(self.blocks3):
             if self.use_checkpoint and i < self.checkpoint_num[2]:
-                x = checkpoint.checkpoint(blk, x)
+                x = checkpoint.checkpoint(blk, x, use_reentrant=False)
             else:
                 x = blk(x)
         x_out = self.norm3(x.permute(0, 2, 3, 1))
@@ -410,7 +410,7 @@ class UniFormer(nn.Module):
         x = self.patch_embed4(x)
         for i, blk in enumerate(self.blocks4):
             if self.use_checkpoint and i < self.checkpoint_num[3]:
-                x = checkpoint.checkpoint(blk, x)
+                x = checkpoint.checkpoint(blk, x, use_reentrant=False)
             else:
                 x = blk(x)
         x_out = self.norm4(x.permute(0, 2, 3, 1))

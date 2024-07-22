@@ -180,7 +180,7 @@ def load_preprocess(config):
     return vis_processors, txt_processors
 
 
-def load_model_and_preprocess(name, model_type, is_eval=False, device="cpu",bert_base_uncased_dir_path=None):
+def load_model_and_preprocess(name, model_type, is_eval=False, device="cpu"):
     """
     Load model and its related preprocessors.
 
@@ -202,8 +202,7 @@ def load_model_and_preprocess(name, model_type, is_eval=False, device="cpu",bert
     model_cls = registry.get_model_class(name)
 
     # load model
-    assert bert_base_uncased_dir_path is not None
-    model = model_cls.from_pretrained(model_type=model_type,bert_base_uncased_dir_path=bert_base_uncased_dir_path)
+    model = model_cls.from_pretrained(model_type=model_type)
 
     if is_eval:
         model.eval()

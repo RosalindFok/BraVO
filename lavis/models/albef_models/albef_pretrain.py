@@ -390,7 +390,7 @@ class AlbefPretrain(AlbefBase, MomentumDistilationMixin, SharedQueueMixin):
         )
         config_text_encoder.fusion_layer = 6
         text_encoder = BertForMaskedLM.from_pretrained(
-            "bert-base-uncased", config=config_text_encoder
+            os.path.abspath(os.path.join('..', 'large_files_for_BraVO', 'bert-base-uncased')), config=config_text_encoder
         )
 
         embed_dim = cfg.get("embed_dim", 256)

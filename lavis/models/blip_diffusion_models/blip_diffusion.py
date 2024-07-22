@@ -72,12 +72,11 @@ class BlipDiffusion(BaseModel):
         qformer_cross_attention_freq=1,
         qformer_pretrained_path=None,
         qformer_train=False,
-        sd_pretrained_model_name_or_path=os.path.abspath(os.path.join('..','large_files_for_BraVO','stable-diffusion-v1-5')),
+        sd_pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5",
         sd_train_text_encoder=False,
         controlnet_pretrained_model_name_or_path=None,
         vae_half_precision=False,
         proj_train=False,
-        bert_base_uncased_dir_path=None
     ):
         super().__init__()
 
@@ -88,7 +87,6 @@ class BlipDiffusion(BaseModel):
             vit_model=vit_model,
             num_query_token=qformer_num_query_token,
             cross_attention_freq=qformer_cross_attention_freq,
-            bert_base_uncased_dir_path = bert_base_uncased_dir_path
         )
         if qformer_pretrained_path is not None:
             state_dict = torch.load(qformer_pretrained_path, map_location="cpu")[
@@ -188,7 +186,7 @@ class BlipDiffusion(BaseModel):
     def ddim_scheduler(self):
         if not hasattr(self, "_ddim_scheduler"):
             self._ddim_scheduler = DDIMScheduler.from_config(
-                "../large_files_for_BraVO/stable-diffusion-v1-5", subfolder="scheduler"
+                "runwayml/stable-diffusion-v1-5", subfolder="scheduler"
             )
         return self._ddim_scheduler
 
@@ -324,13 +322,13 @@ class BlipDiffusion(BaseModel):
     def _init_latent(self, latent, height, width, generator, batch_size):
         if latent is None:
             latent = torch.randn(
-                (1, self.unet.config.in_channels, height // 8, width // 8),
+                (1, self.unet.in_channels, height // 8, width // 8),
                 generator=generator,
                 device=generator.device,
             )
         latent = latent.expand(
             batch_size,
-            self.unet.config.in_channels,
+            self.unet.in_channels,
             height // 8,
             width // 8,
         )
@@ -917,7 +915,7 @@ class BlipDiffusion(BaseModel):
         return ctx_embeddings
 
     @classmethod
-    def from_config(cls, cfg, bert_base_uncased_dir_path=None):
+    def from_config(cls, cfg):
         vit_model = cfg.get("vit_model", "clip_L")
 
         qformer_cross_attention_freq = cfg.get("qformer_cross_attention_freq", 1)
@@ -926,7 +924,7 @@ class BlipDiffusion(BaseModel):
 
         sd_train_text_encoder = cfg.get("sd_train_text_encoder", False)
         sd_pretrained_model_name_or_path = cfg.get(
-            "sd_pretrained_model_name_or_path", "../large_files_for_BraVO/stable-diffusion-v1-5"
+            "sd_pretrained_model_name_or_path", "runwayml/stable-diffusion-v1-5"
         )
 
         controlnet_pretrained_model_name_or_path = cfg.get(
@@ -935,7 +933,6 @@ class BlipDiffusion(BaseModel):
 
         vae_half_precision = cfg.get("vae_half_precision", False)
 
-        assert bert_base_uncased_dir_path is not None
         model = cls(
             vit_model=vit_model,
             qformer_cross_attention_freq=qformer_cross_attention_freq,
@@ -945,7 +942,6 @@ class BlipDiffusion(BaseModel):
             sd_pretrained_model_name_or_path=sd_pretrained_model_name_or_path,
             controlnet_pretrained_model_name_or_path=controlnet_pretrained_model_name_or_path,
             vae_half_precision=vae_half_precision,
-            bert_base_uncased_dir_path = bert_base_uncased_dir_path
         )
         model.load_checkpoint_from_config(cfg)
 
@@ -953,7 +949,6 @@ class BlipDiffusion(BaseModel):
 
     def load_checkpoint_from_dir(self, checkpoint_dir_or_url):
         # if checkpoint_dir is a url, download it and untar it
-        assert is_url(checkpoint_dir_or_url) == False, print('You are not able to download within GFW!')
         if is_url(checkpoint_dir_or_url):
             checkpoint_dir_or_url = download_and_untar(checkpoint_dir_or_url)
 

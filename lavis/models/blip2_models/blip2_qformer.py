@@ -54,11 +54,10 @@ class Blip2Qformer(Blip2Base):
         cross_attention_freq=2,
         embed_dim=256,
         max_txt_len=32,
-        bert_base_uncased_dir_path=None
     ):
         super().__init__()
-        assert bert_base_uncased_dir_path is not None, "bert_base_uncased_dir_path is required"
-        self.tokenizer = self.init_tokenizer(bert_base_uncased_dir_path=bert_base_uncased_dir_path)
+
+        self.tokenizer = self.init_tokenizer()
 
         self.visual_encoder, self.ln_vision = self.init_vision_encoder(
             vit_model, img_size, drop_path_rate, use_grad_checkpoint, vit_precision
@@ -70,8 +69,7 @@ class Blip2Qformer(Blip2Base):
             self.visual_encoder.train = disabled_train
             logging.info("freeze vision encoder")
         self.Qformer, self.query_tokens = self.init_Qformer(
-            num_query_token, self.visual_encoder.num_features, cross_attention_freq,
-            bert_base_uncased_dir_path = bert_base_uncased_dir_path
+            num_query_token, self.visual_encoder.num_features, cross_attention_freq
         )
         self.Qformer.resize_token_embeddings(len(self.tokenizer))
         state_dict = self.Qformer.state_dict()
@@ -500,7 +498,7 @@ class Blip2Qformer(Blip2Base):
         )
 
     @classmethod
-    def from_config(cls, cfg, bert_base_uncased_dir_path=None):
+    def from_config(cls, cfg):
         vit_model = cfg.get("vit_model", "eva_clip_g")
         img_size = cfg.get("image_size")
         num_query_token = cfg.get("num_query_token")
@@ -513,7 +511,6 @@ class Blip2Qformer(Blip2Base):
 
         max_txt_len = cfg.get("max_txt_len", 32)
 
-        assert bert_base_uncased_dir_path is not None, "bert_base_uncased_dir_path is not provided"
         model = cls(
             vit_model=vit_model,
             img_size=img_size,
@@ -524,7 +521,6 @@ class Blip2Qformer(Blip2Base):
             num_query_token=num_query_token,
             cross_attention_freq=cross_attention_freq,
             max_txt_len=max_txt_len,
-            bert_base_uncased_dir_path=bert_base_uncased_dir_path
         )
         model.load_checkpoint_from_config(cfg)
 

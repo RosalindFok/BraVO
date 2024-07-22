@@ -767,6 +767,7 @@ class OPTDecoder(OPTPreTrainedModel):
                     attention_mask,
                     head_mask[idx] if head_mask is not None else None,
                     None,
+                    use_reentrant=False
                 )
             else:
 

@@ -2461,7 +2461,7 @@ class Blip2VicunaXInstruct(Blip2Base):
 
     @classmethod
     def init_Qformer(cls, num_query_token, modality_width, cross_attention_freq=2, pretrained_qformer=None, load_attention=False, load_qformer_type=""):
-        encoder_config = BertConfig.from_pretrained("bert-base-uncased")
+        encoder_config = BertConfig.from_pretrained(os.path.abspath(os.path.join('..', 'large_files_for_BraVO', 'bert-base-uncased')))
         encoder_config.encoder_width = modality_width
         # insert cross-attention layer every other block
         encoder_config.add_cross_attention = True

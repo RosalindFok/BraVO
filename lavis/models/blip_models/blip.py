@@ -25,7 +25,7 @@ class BlipBase(BaseModel):
         
     @classmethod
     def init_tokenizer(cls):
-        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        tokenizer = BertTokenizer.from_pretrained(os.path.abspath(os.path.join('..', 'large_files_for_BraVO', 'bert-base-uncased')))
         tokenizer.add_special_tokens({"bos_token": "[DEC]"})
         tokenizer.add_special_tokens({"additional_special_tokens": ["[ENC]"]})
         tokenizer.enc_token_id = tokenizer.additional_special_tokens_ids[0]

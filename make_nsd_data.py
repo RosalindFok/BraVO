@@ -1,7 +1,6 @@
 import os
 import h5py
 import time
-import json
 import torch
 import shutil
 import scipy.io
@@ -176,7 +175,7 @@ class NSD_DATA():
         print(f'It took {end_time - start_time:.2f} seconds to read {self.coco_annotation_dir_path}.')
         return captions_dict, categories_dict
     
-    def read_ROIs(self):
+    def read_ROIs(self) -> None:
         start_time = time.time()
         # saved path for ROIs
         saved_rois_path = join_paths(self.subject_saved_dir_path, 'ROIs')
@@ -281,7 +280,7 @@ class NSD_DATA():
         __get_rois__('thalamus', ROIs_type='volume')
 
         end_time = time.time()
-        print(f'It took {end_time - start_time:.2f} seconds to get ROIs.')
+        print(f'It took {end_time - start_time:.2f} seconds to get ROIs to {saved_rois_path}.')
 
     def make_pairs(self) -> None:
         """
@@ -375,8 +374,7 @@ class NSD_DATA():
                             'captions_list' : captions_list, # list[str]
                             'instances_category' : category_list
                         }
-                        with open(join_paths(saved_path, 'strings.json'), 'w', encoding='utf-8') as json_file:
-                            json.dump(json_data, json_file, indent=4, ensure_ascii=False)
+                        write_json_file(path = join_paths(saved_path, 'strings.json'), data = json_data)
 
                     # incorrect trial
                     else:

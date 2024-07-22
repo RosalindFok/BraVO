@@ -25,7 +25,7 @@ from transformers import BertTokenizer
 class AlbefBase(BaseModel):
     @classmethod
     def init_tokenizer(cls):
-        return BertTokenizer.from_pretrained("bert-base-uncased")
+        return BertTokenizer.from_pretrained(os.path.abspath(os.path.join('..', 'large_files_for_BraVO', 'bert-base-uncased')))
 
     def load_from_pretrained(self, url_or_filename, rename_text_keys=True):
         if is_url(url_or_filename):

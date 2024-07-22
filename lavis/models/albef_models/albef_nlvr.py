@@ -232,7 +232,7 @@ class AlbefNLVR(AlbefBase, MomentumDistilationMixin):
         bert_config.num_hidden_layers = 18
 
         text_encoder = BertModel.from_pretrained(
-            "bert-base-uncased", config=bert_config, add_pooling_layer=False
+            os.path.abspath(os.path.join('..', 'large_files_for_BraVO', 'bert-base-uncased')), config=bert_config, add_pooling_layer=False
         )
 
         alpha = cfg.get("alpha", 0.4)

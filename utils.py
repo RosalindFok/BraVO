@@ -7,7 +7,7 @@ import numpy as np
 import nibabel as nib
 
 __all__ = ['join_paths', 'read_nii_file', 'save_nii_file', 'check_and_make_dirs', 'read_json_file', 'merge_dicts_if_no_conflict'
-           'NSD_dir_path', 'BraVO_saved_dir_path', 'bert_base_uncased_dir_path']
+           'NSD_dir_path', 'BraVO_saved_dir_path']
 
 ''' utility functions '''
 join_paths = lambda *args: os.path.join(*args)
@@ -30,10 +30,27 @@ def read_json_file(path : str)->dict[any, any]:
         data = json.load(f)
     return data
 
-def write_json_file(path : str, data : dict[any, any]) -> bool:
+def write_json_file(path : str, data : dict[any, any]) -> None:
+    """  
+    Writes a dictionary to a JSON file.  
+
+    This function serializes a dictionary into JSON format and writes it to   
+    the specified file path with UTF-8 encoding. The JSON output is pretty-printed  
+    with an indentation of 4 spaces and ensures that non-ASCII characters are preserved.  
+
+    Args:  
+        path (str): The path where the JSON file will be written.  
+        data (Dict[Any, Any]): The dictionary to be serialized and written to the file.  
+
+    Returns:  
+        None  
+
+    Raises:  
+        IOError: If the file cannot be written.  
+        TypeError: If the data is not serializable to JSON.  
+    """  
     with open(path, 'w', encoding='utf-8') as json_file:
         json.dump(data, json_file, indent=4, ensure_ascii=False)
-    return True
 
 def get_items_in_list_via_substrs(items_list : list[str], *substrs : str) -> list[str]:
     """  
@@ -87,7 +104,3 @@ def merge_dicts_if_no_conflict(dict1 : dict[any, any], dict2 : dict[any, any]) -
 NSD_dir_path = join_paths('..', 'dataset', 'NSD')
 BraVO_saved_dir_path = join_paths('..', 'BraVO_saved')
 check_and_make_dirs(BraVO_saved_dir_path)
-
-large_files_for_BraVO_dir_path = join_paths('..', 'large_files_for_BraVO')
-bert_base_uncased_dir_path = os.path.abspath(join_paths(large_files_for_BraVO_dir_path, 'bert-base-uncased'))
-assert os.path.exists(bert_base_uncased_dir_path), print(f'Error: {bert_base_uncased_dir_path} does not exist.')

@@ -5,7 +5,7 @@ model:
   qformer_cross_attention_freq: 1
 
   sd_train_text_encoder: False
-  sd_pretrained_model_name_or_path: "../large_files_for_BraVO/stable-diffusion-v1-5" 
+  sd_pretrained_model_name_or_path: "runwayml/stable-diffusion-v1-5" 
 
   load_finetuned: False
   load_pretrained: True
