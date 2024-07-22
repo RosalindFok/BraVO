@@ -30,6 +30,38 @@ def read_json_file(path : str)->dict[any, any]:
         data = json.load(f)
     return data
 
+def write_json_file(path : str, data : dict[any, any]) -> bool:
+    with open(path, 'w', encoding='utf-8') as json_file:
+        json.dump(data, json_file, indent=4, ensure_ascii=False)
+    return True
+
+def get_items_in_list_via_substrs(items_list : list[str], *substrs : str) -> list[str]:
+    """  
+    Checks if each item in the given items_list contains all specified substrings.  
+
+    Args:  
+        items_list (list[str]): List of items (strings) to be checked.  
+        *substrs (str): Variable length argument list of substrings to check within each item.  
+
+    Returns:  
+        list[str]: A list of items that contain all the specified substrings.  
+        
+    Raises:  
+        TypeError: If substrs is not provided.  
+
+    Example:  
+        >>> items = [  
+        ...     "This is a test string",  
+        ...     "Another example",  
+        ...     "Test with multiple substrings",  
+        ...     "Final string example"  
+        ... ]  
+        >>> get_items_in_list_via_substrs(items, "test", "string")  
+        ['This is a test string', 'Test with multiple substrings']  
+    """  
+    results_list = [string for string in items_list if all(substr in string for substr in substrs)]
+    return results_list
+
 def merge_dicts_if_no_conflict(dict1 : dict[any, any], dict2 : dict[any, any]) -> dict[any, any] | None:
     """
     Check if there are key conflicts between two dictionaries.
