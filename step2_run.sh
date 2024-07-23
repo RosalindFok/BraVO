@@ -13,6 +13,7 @@ STATE_FILE="state_${BATCH_JOB_ID}.log"
 X_LOG_DIR="log_${SLURM_JOB_ID}"
 X_GPU_LOG="${X_LOG_DIR}/gpu.log"
 mkdir "${X_LOG_DIR}"
+/usr/bin/touch ${X_GPU_LOG}
 function gpus_collection(){
    sleep 15
    process=`ps -ef | grep python | grep $USER | grep -v "grep" | wc -l`

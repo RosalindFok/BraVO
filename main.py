@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from config import configs_dict
-from dataset import make_paths_dict, NSD_Dataset
+from dataset import make_paths_dict, make_rois_dict, NSD_Dataset
 from models import device, BraVO_Decoder, BraVO_Encoder, load_blip_models
 
 
@@ -64,10 +64,10 @@ def main() -> None:
     from PIL import Image
     blip_diffusion_model, vis_preprocess, txt_preprocess = load_blip_models(mode = 'diffusion')
     cond_image = Image.open(join_paths('..','BraVO_saved','subj01_pairs','test','session01_run01_trial01','image.png')).convert("RGB")
-    cond_images = vis_preprocess["eval"](cond_image).unsqueeze(0).cuda()
+    cond_images = vis_preprocess["eval"](cond_image).unsqueeze(0).to(device)
     iter_seed = 88888
     guidance_scale = 7.5
-    num_inference_steps = 50
+    num_inference_steps = 50 # TODO 可以调整哒
     negative_prompt = "over-exposure, under-exposure, saturated, duplicate, out of frame, lowres, cropped, worst quality, low quality, jpeg artifacts, morbid, mutilated, out of frame, ugly, bad anatomy, bad proportions, deformed, blurry, duplicate"
     cond_subjects = [txt_preprocess["eval"]('cows')]
     tgt_subjects = [txt_preprocess["eval"]('cows')]
@@ -104,6 +104,7 @@ def main() -> None:
     exit(0)
 
     # Data
+    rois_dict = make_rois_dict(subj_id=subj_id)
     train_paths_dict = make_paths_dict(subj_id=subj_id, mode='train')
     test_paths_dict = make_paths_dict(subj_id=subj_id, mode='test')
     train_dataloader = DataLoader(NSD_Dataset(train_paths_dict), batch_size=batch_size, shuffle=False, num_workers=6)

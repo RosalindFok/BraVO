@@ -10,7 +10,7 @@ __all__ = ['join_paths', 'read_nii_file', 'save_nii_file', 'check_and_make_dirs'
            'NSD_dir_path', 'BraVO_saved_dir_path']
 
 ''' utility functions '''
-join_paths = lambda *args: os.path.join(*args)
+join_paths = lambda *args: os.path.abspath(os.path.join(*args))
 read_nii_file = lambda path: [nib.load(path).header, nib.load(path).get_fdata()]
 save_nii_file = lambda data, path: nib.save(nib.Nifti1Image(data, np.eye(4)), path)
 check_and_make_dirs = lambda path: os.makedirs(path, exist_ok=True)

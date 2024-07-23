@@ -72,7 +72,7 @@ class BlipDiffusion(BaseModel):
         qformer_cross_attention_freq=1,
         qformer_pretrained_path=None,
         qformer_train=False,
-        sd_pretrained_model_name_or_path="runwayml/stable-diffusion-v1-5",
+        sd_pretrained_model_name_or_path="../large_files_for_BraVO/stable-diffusion-v1-5",
         sd_train_text_encoder=False,
         controlnet_pretrained_model_name_or_path=None,
         vae_half_precision=False,
@@ -128,7 +128,8 @@ class BlipDiffusion(BaseModel):
         )
         # self.unet.enable_xformers_memory_efficient_attention()
 
-        self.noise_scheduler = DDPMScheduler.from_config(
+        # self.noise_scheduler = DDPMScheduler.from_config(
+        self.noise_scheduler = DDPMScheduler.from_pretrained(
             sd_pretrained_model_name_or_path, subfolder="scheduler"
         )
 
@@ -186,7 +187,7 @@ class BlipDiffusion(BaseModel):
     def ddim_scheduler(self):
         if not hasattr(self, "_ddim_scheduler"):
             self._ddim_scheduler = DDIMScheduler.from_config(
-                "runwayml/stable-diffusion-v1-5", subfolder="scheduler"
+                "../large_files_for_BraVO/stable-diffusion-v1-5", subfolder="scheduler"
             )
         return self._ddim_scheduler
 
@@ -322,13 +323,13 @@ class BlipDiffusion(BaseModel):
     def _init_latent(self, latent, height, width, generator, batch_size):
         if latent is None:
             latent = torch.randn(
-                (1, self.unet.in_channels, height // 8, width // 8),
+                (1, self.unet.config.in_channels, height // 8, width // 8),
                 generator=generator,
                 device=generator.device,
             )
         latent = latent.expand(
             batch_size,
-            self.unet.in_channels,
+            self.unet.config.in_channels,
             height // 8,
             width // 8,
         )
@@ -924,7 +925,7 @@ class BlipDiffusion(BaseModel):
 
         sd_train_text_encoder = cfg.get("sd_train_text_encoder", False)
         sd_pretrained_model_name_or_path = cfg.get(
-            "sd_pretrained_model_name_or_path", "runwayml/stable-diffusion-v1-5"
+            "sd_pretrained_model_name_or_path", "../large_files_for_BraVO/stable-diffusion-v1-5"
         )
 
         controlnet_pretrained_model_name_or_path = cfg.get(

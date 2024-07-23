@@ -7,7 +7,8 @@ from torch.utils.data import Dataset
 from utils import BraVO_saved_dir_path
 from utils import join_paths, read_nii_file
 
-__all__ = ['BLIP2_Dataset', 'NSD_Dataset']
+__all__ = ['BLIP2_Dataset', 'NSD_Dataset',
+           'make_paths_dict', 'make_rois_dict']
 
 class BLIP2_Dataset(Dataset):
     """
@@ -63,6 +64,17 @@ def make_paths_dict(subj_id : int, mode : str) -> dict[str, dict[str, str]]:
         }
     return trial_paths_dict
 
+def make_rois_dict(subj_id : int) -> dict:
+    dir_path = join_paths(BraVO_saved_dir_path, f'subj{str(subj_id).zfill(2)}_pairs', 'ROIs')
+    assert os.path.exists(dir_path), print(f'dir_path={dir_path} does not exist.')
+    rois_dict = {} # {key=surface or volume, value=dict{key=roi_name, value=list[roi_path]}}
+    for roi_type in os.listdir(dir_path):
+        roi_type_path = join_paths(dir_path, roi_type)
+        rois_dict[roi_type] = {}
+        for roi_name in os.listdir(roi_type_path):
+            roi_name_path = join_paths(roi_type_path, roi_name)
+            rois_dict[roi_type][roi_name] = [join_paths(roi_name_path, x) for x in os.listdir(roi_name_path)]
+    return rois_dict
 
 class NSD_Dataset(Dataset):
     """
