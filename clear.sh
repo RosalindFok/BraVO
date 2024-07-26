@@ -1,19 +1,18 @@
 #!/bin/bash
+log_patterns=("state_*.log" "slurm-*.out")  
+for pattern in "${log_patterns[@]}"; do  
+  files=$(find . -type f -name "${pattern}")  
+  for file in $files; do  
+    if [ -f "${file}" ]; then  
+      rm -f "${file}"  
+    fi  
+  done  
+done
 
-handle_error() {
-    echo ""
-}
-
-set -e
-trap handle_error ERR
-
-rm -rf log_* || true
-
-rm state_.log || true
-
-rm slurm-*.out || true
-
-find ./ -type d -name '__pycache__' -exec rm -rf {} \; || true
-
-set +e
-trap - ERR
+tmp_file=$(mktemp)  
+find ./ -type d -name '__pycache__' > "${tmp_file}"  
+while IFS= read -r dir  
+do  
+  rm -rf "${dir}"  
+done < "${tmp_file}"  
+rm -f "${tmp_file}"  

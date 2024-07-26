@@ -1,22 +1,22 @@
 import os
 import h5py
 import time
-import torch
 import shutil
 import scipy.io
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from PIL import Image
-from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
-from dataset import BLIP2_Dataset
+from config import configs_dict
 from models import device, load_blip_models
 from utils import NSD_dir_path, BraVO_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs
 
 # Load blip2 model
-BLIP2_Encoder_model, vis_processors, txt_processors = load_blip_models(mode = 'encoder')
+BLIP_Diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
+BLIP2_Matching_model, bm_vis_processors, bm_txt_processors = load_blip_models(mode = 'matching')
 
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
@@ -123,7 +123,7 @@ class NSD_DATA():
         print(f'It took {end_time - start_time:.2f} seconds to read {self.nsddata_stimuli_hdf5_file_path}.')
         return imgBrick
     
-    def read_coco_annotation(self) -> tuple[dict[int, list[str]], dict[int, list[str]]]:
+    def read_coco_annotation(self) -> tuple[dict[int, list[str]], dict[int, list[dict[str, any]]]]:
         def __extract_captions__(captions_annotations : list[dict[str, any]]) -> dict[int, list[str]]:
             annotations = {} # {key=id : value=[caption1, caption2, ...]}
             # some pictures have multiple captions
@@ -284,7 +284,7 @@ class NSD_DATA():
 
     def make_pairs(self) -> None:
         """
-        fMRI <--> image <--> text
+        fMRI <--> image + text
         """        
         ## behav_responses_tsv
         responses = self.read_behav_responses_tsv()
@@ -331,6 +331,7 @@ class NSD_DATA():
                         trial_id = int(trial[column_of_TRIAL])
                         session_run_trial_string = f'session{str(session_id).zfill(2)}_run{str(run_id).zfill(2)}_trial{str(trial_id).zfill(2)}'
                         KID_73 = int(trial[column_of_73KID]) - 1 # 0-based index
+                        # Note: Split data into train and test sets based on whether the 73KID is part of the shared indices.
                         # Train Set
                         if not KID_73 in sharedixs:
                             saved_path = join_paths(train_saved_dir_path, session_run_trial_string)
@@ -345,34 +346,59 @@ class NSD_DATA():
                         image = Image.fromarray(imgBrick[KID_73])
                         image.save(join_paths(saved_path, 'image.png'))
 
-                        # caption and other infos
+                        # old_flag, captions and categories
                         OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
                         captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
                         category_list = categories_dict[stim_info[KID_73]] # list[dict[str, any]], [{'supercategory', 'name', 'area}]
-                        # Encode image and caption via BLIP-2, get embedding whose dim=768
-                        batch_size = len(captions_list)
-                        BLIP2_Dataloader = DataLoader(BLIP2_Dataset(image, captions_list, vis_processors, txt_processors, device), batch_size=batch_size, shuffle=False)
-                        for sample in BLIP2_Dataloader:
-                            # dim=(batch_size, num of queries, 768) before Tensor.mean(dim=1)
-                            # dim=(batch_size, 768) after Tensor.mean(dim=1), where batch_size = number of captions of this image
-                            multimodal_embedding = torch.squeeze(BLIP2_Encoder_model.extract_features(sample).multimodal_embeds.mean(dim=1)).to('cpu')
-                            image_embedding = torch.squeeze(BLIP2_Encoder_model.extract_features(sample, mode='image').image_embeds.mean(dim=1)).to('cpu')
-                            caption_embedding = torch.squeeze(BLIP2_Encoder_model.extract_features(sample, mode='text').text_embeds.mean(dim=1)).to('cpu')
-
-                        # Save the embeddings and information to npz file
-                        save_npz_path = join_paths(saved_path, 'embedding.npz')
-                        np.savez(
-                            save_npz_path, 
-                            image_embedding=image_embedding.numpy(), # numpy
-                            captions_embedding=caption_embedding.numpy(), # numpy
-                            multimodal_embedding=multimodal_embedding.numpy(), # numpy
-                        )
                         
+                        # Select the best caption via itm score
+                        itm_max, selected_caption = -1, ''
+                        sample = {}
+                        sample['image'] = bm_vis_processors['eval'](image).unsqueeze(0).to(device)
+                        for caption in captions_list:
+                            sample['text_input'] = bm_txt_processors['eval'](caption)
+                            itm_output = BLIP2_Matching_model(sample, match_head='itm')
+                            itm_scores = F.softmax(itm_output, dim=1)
+                            itm_scores = itm_scores[:, 1].item()
+                            if itm_scores > itm_max:
+                                itm_max = itm_scores
+                                selected_caption = caption
+                        del sample['text_input']
+                        del sample['image']
+                        selected_caption_processed = [bd_txt_processors['eval'](selected_caption)]
+                        sample['prompt'] = selected_caption_processed
+                        sample['cond_images'] = bd_vis_processors['eval'](image).unsqueeze(0).to(device)
+
+                        # Select the category with the biggest area
+                        area_of_each_category = {}
+                        for category in category_list:
+                            name = category['name']
+                            area = category['area']
+                            if name in area_of_each_category:
+                                area_of_each_category[name] += area
+                            else:
+                                area_of_each_category[name] = area
+                        max_key = max(area_of_each_category, key=lambda k: area_of_each_category[k])
+                        max_key_processed = [bd_txt_processors['eval'](max_key)]
+                        sample['cond_subject'] = max_key_processed
+                        sample['tgt_subject']  = max_key_processed
+
+                        # Extract the embedding and save it as a npy file
+                        embedding = BLIP_Diffusion_model.generate_embedding(
+                                samples=sample,
+                                neg_prompt=configs_dict['negative_prompt'],
+                                guidance_scale=configs_dict['guidance_scale'],
+                            )
+                        assert embedding.shape == (2, 77, 768), print(f'In {saved_path}, embedding shape is {embedding.shape}, not (2, 77, 768).')
+                        np.save(join_paths(saved_path, 'embedding.npy'), embedding.cpu().numpy())
+
                         # Save the strings to json file
                         json_data = {
                             'isold' : 'novel' if OLD_flag == 0 else 'old', # str
+                            'selected_caption' : selected_caption, # str
                             'captions_list' : captions_list, # list[str]
-                            'instances_category' : category_list
+                            'selected_category' : max_key, # str
+                            'instances_category' : category_list, #  list[dict[str, any]]
                         }
                         write_json_file(path = join_paths(saved_path, 'strings.json'), data = json_data)
 
@@ -382,6 +408,7 @@ class NSD_DATA():
 
             else:
                 raise NotImplementedError(f'Space type: {space_type} is not supported.')
+            
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
 
 # make pairs of NSD

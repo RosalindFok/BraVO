@@ -29,17 +29,24 @@ def load_blip_models(mode : str) -> tuple[torch.nn.Module, dict, dict]:
     start_time = time.time()
     if mode == 'encoder':
         model, vis_processors, txt_processors = load_model_and_preprocess(
-                name="blip2_feature_extractor", 
-                model_type="coco", # Go to blip2_qformer.py to see model types
+                name='blip2_feature_extractor', # class Blip2Qformer(Blip2Base)
+                model_type='coco', 
                 is_eval=True, 
                 device=device
             )
     elif mode == 'diffusion':
         model, vis_processors, txt_processors = load_model_and_preprocess(
-                name="blip_diffusion", # class BlipDiffusion(BaseModel)
+                name='blip_diffusion', # class BlipDiffusion(BaseModel)
                 model_type="base", 
                 is_eval=True, 
                 device=device
+            )
+    elif mode == 'matching':
+        model, vis_processors, txt_processors = load_model_and_preprocess(
+                name='blip2_image_text_matching', # class Blip2ITM(Blip2Qformer)
+                model_type='coco', 
+                is_eval=True,
+                device=device 
             )
     else:
         raise ValueError(f"Invalid mode: {mode}.")  
@@ -48,51 +55,13 @@ def load_blip_models(mode : str) -> tuple[torch.nn.Module, dict, dict]:
     print(f'It took {end_time - start_time:.2f} seconds to load the BLIP-2 model {mode}.')
     return model, vis_processors, txt_processors
 
-class Average_Embedding(nn.Module):
-    """
-    Input: caption_embedding or multimodal_embedding, whose shape is (batch_size, k, 768), k = number of captions of the corresponding image.
-    Output: the average embedding
-    """
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
-        # k = 1
-        # k >= 1
-        x = x.mean(dim=1)
-
-        return x
-
-
-class MaxSimilarty_Embedding(nn.Module):
-    """
-    Input: image_embedding, whose shape is (batch_size, 768).
-    Input: caption_embedding or multimodal_embedding, whose shape is (batch_size, k, 768), k = number of captions of the corresponding image.
-    Output: the embedding with the highest similarity with the image_embedding.
-    """
-    def __init__(self) -> None:
-        super().__init__()
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
-        # k = 1
-        # similarity = (features_image.image_embeds_proj @ features_text.text_embeds_proj[:,0,:].t()).max()
-
-        # k >= 1
-        
-        return x
-    
-
+  
 class BraVO_Encoder(nn.Module):
     """
     Map the embedding of image or caption, into the brain activity.
     """
     def __init__(self) -> None:
         super().__init__()
-
-    def brainnetome():
-        pass
-
-    def brain_functional_network():
-        pass
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         x = x 
