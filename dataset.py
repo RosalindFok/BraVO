@@ -8,7 +8,7 @@ from utils import BraVO_saved_dir_path
 from utils import join_paths, read_nii_file
 
 __all__ = ['NSD_Dataset',
-           'make_paths_dict', 'make_rois_dict']
+           'make_paths_dict']
 
 
 def make_paths_dict(subj_id : int) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]], dict[str, dict[str, list[str]]]]:
@@ -68,6 +68,14 @@ def make_paths_dict(subj_id : int) -> tuple[dict[str, dict[str, str]], dict[str,
 
     return train_trial_path_dict, test_trial_path_dict, rois_path_dict
 
+def masking_fmri_to_array(fmri_data : np.ndarray, mask_data : np.ndarray, threshold : int) -> np.ndarray:
+    mask_data = mask_data.astype(np.int16)
+    # -1 = non-cortical voxels, 0 = Unknown
+    assert threshold >= 0, print(f'threshold={threshold} should be non-negative.')
+    assert threshold <= max(np.max(mask_data), np.max(fmri_data)), print(f'threshold={threshold} should be less than or equal to the maximum value of mask_data={np.max(mask_data)} and fmri_data={np.max(fmri_data)}.')
+    mask_bool = mask_data > threshold
+    masked_data = fmri_data[mask_bool]
+    return masked_data
 
 class NSD_Dataset(Dataset):
     """
@@ -82,28 +90,28 @@ class NSD_Dataset(Dataset):
         assert self.lh_mask_data.shape == self.rh_mask_data.shape == self.mask_data.shape, print(f'lh_mask_data.shape={self.lh_mask_data.shape} != rh_mask_data.shape={self.rh_mask_data.shape} != mask_data.shape={self.mask_data.shape}')
         self.threshold = threshold
 
-    def __masking__(self, fmri_data : np.ndarray) -> np.ndarray:
-        mask_data = self.mask_data.astype(np.int16)
-        # -1 = non-cortical voxels, 0 = Unknown
-        assert self.threshold >= 0, print(f'threshold={self.threshold} should be non-negative.')
-        assert self.threshold <= max(np.max(mask_data), np.max(fmri_data)), print(f'threshold={self.threshold} should be less than or equal to the maximum value of mask_data={np.max(mask_data)} and fmri_data={np.max(fmri_data)}.')
-        mask_bool = mask_data > self.threshold
-        masked_data = fmri_data[mask_bool]
-        return masked_data
-
     def __getitem__(self, index) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # path
         fmri_path = self.trial_path_dict[index]['fmri']
         image_path = self.trial_path_dict[index]['image']
         embedding_path = self.trial_path_dict[index]['embedding']
-
+        
         # data
         fmri_header, fmri_data = read_nii_file(fmri_path)
+        # Preprocessed the fmri_data: make all negative values 0, the 5% most maximum into the threshold of 5%, then normalize to [0, 1]
+        fmri_data[fmri_data < 0] = 0
+        sorted_fmri_data = np.sort(fmri_data.flatten())
+        t = sorted_fmri_data[int(len(sorted_fmri_data) * 0.95)]
+        fmri_data[fmri_data > t] = t
+        fmri_data = (fmri_data - np.min(fmri_data)) / (np.max(fmri_data) - np.min(fmri_data))
         assert fmri_data.shape == self.mask_data.shape, print(f'fmri_data.shape={fmri_data.shape} != mask_data.shape={self.mask_data.shape}')
-        masked_data = self.__masking__(fmri_data=fmri_data)
+        masked_data = masking_fmri_to_array(fmri_data=fmri_data, mask_data=self.mask_data, threshold=self.threshold)
         image_data = np.array(Image.open(image_path))
         embedding  = np.load(embedding_path)
 
-        return index, masked_data, image_data, embedding
+        # Shape: fmri([145, 186, 148]), masked([K]), image([425, 425, 3]), embedding([2, 77, 768])
+        # embedding = [uncond_embeddings, text_embeddings]
+        return index, fmri_data, masked_data, image_data, embedding
     
     def __len__(self) -> int:
         return  len(self.trial_path_dict)

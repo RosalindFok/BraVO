@@ -342,6 +342,7 @@ class NSD_DATA():
 
                         # fMRI
                         save_nii_file(fmri, join_paths(saved_path, 'fmri.nii.gz'))
+
                         # image: BLIP-2 encodes via RGB
                         image = Image.fromarray(imgBrick[KID_73])
                         image.save(join_paths(saved_path, 'image.png'))
@@ -384,10 +385,12 @@ class NSD_DATA():
                         sample['tgt_subject']  = max_key_processed
 
                         # Extract the embedding and save it as a npy file
+                        # embedding = [uncond_embeddings, text_embeddings]
+                        # embedding.shape = [2,77,768]
                         embedding = BLIP_Diffusion_model.generate_embedding(
                                 samples=sample,
-                                neg_prompt=configs_dict['negative_prompt'],
-                                guidance_scale=configs_dict['guidance_scale'],
+                                neg_prompt=configs_dict['blip_diffusion']['negative_prompt'],
+                                guidance_scale=configs_dict['blip_diffusion']['guidance_scale'],
                             )
                         assert embedding.shape == (2, 77, 768), print(f'In {saved_path}, embedding shape is {embedding.shape}, not (2, 77, 768).')
                         np.save(join_paths(saved_path, 'embedding.npy'), embedding.cpu().numpy())
