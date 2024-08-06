@@ -9,7 +9,9 @@ STATE_FILE="state_${BATCH_JOB_ID}.log"
 /usr/bin/touch ${STATE_FILE}
 
 # Execute the example script
-python main.py
+python main.py --task train 
+# python main.py --task test 
+# python main.py --task mask 
 
 # Stop the GPU collection process
 echo "over" >> "${STATE_FILE}"

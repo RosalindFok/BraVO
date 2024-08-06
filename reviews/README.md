@@ -24,14 +24,16 @@
       - [\[2018, IEEE TNNLS\] Reconstructing Perceived Images From Human Brain Activities With Bayesian Deep Multiview Learning](#2018-ieee-tnnls-reconstructing-perceived-images-from-human-brain-activities-with-bayesian-deep-multiview-learning)
       - [\[2022, Cereb Cortex\]Reconstructing rapid natural vision with fMRI-conditional video generative adversarial network](#2022-cereb-cortexreconstructing-rapid-natural-vision-with-fmri-conditional-video-generative-adversarial-network)
       - [\[2023, CVPR\] High-resolution image reconstruction with latent diffusion models from human brain activity](#2023-cvpr-high-resolution-image-reconstruction-with-latent-diffusion-models-from-human-brain-activity)
-      - [\[2023, CVPR\]Seeing Beyond the Brain: Conditional Diffusion Model with Sparse Masked Modeling for Vision Decoding](#2023-cvprseeing-beyond-the-brain-conditional-diffusion-model-with-sparse-masked-modeling-for-vision-decoding)
+      - [\[2023, CVPR\] Seeing Beyond the Brain: Conditional Diffusion Model with Sparse Masked Modeling for Vision Decoding](#2023-cvpr-seeing-beyond-the-brain-conditional-diffusion-model-with-sparse-masked-modeling-for-vision-decoding)
       - [\[2023, Scientific Reports\] Natural scene reconstruction from fMRI signals using generative latent diffusion](#2023-scientific-reports-natural-scene-reconstruction-from-fmri-signals-using-generative-latent-diffusion)
       - [\[2023, NeurIPS(spotlight)\]Reconstructing the Mind’s Eye: fMRI-to-Image with Contrastive Learning and Diffusion Priors](#2023-neuripsspotlightreconstructing-the-minds-eye-fmri-to-image-with-contrastive-learning-and-diffusion-priors)
       - [\[2023, NeurIPS(oral)\] Brain Diffusion for Visual Exploration: Cortical Discovery using Large Scale Generative Models](#2023-neuripsoral-brain-diffusion-for-visual-exploration-cortical-discovery-using-large-scale-generative-models)
       - [\[2023, ACMMM\] MindDiffuser: Controlled Image Reconstruction from Human Brain Activity with Semantic and Structural Diffusion](#2023-acmmm-minddiffuser-controlled-image-reconstruction-from-human-brain-activity-with-semantic-and-structural-diffusion)
       - [\[2023, arXiv\] Vision-Language Integration in Multimodal Video Transformers (Partially) Aligns with the Brain](#2023-arxiv-vision-language-integration-in-multimodal-video-transformers-partially-aligns-with-the-brain)
+      - [\[2023, arXiv\]](#2023-arxiv)
       - [\[2024, ICML\] MindEye2: Shared-Subject Models Enable fMRI-To-Image With 1 Hour of Data](#2024-icml-mindeye2-shared-subject-models-enable-fmri-to-image-with-1-hour-of-data)
       - [\[2024, ICLR\] Decoding natural images from EEG for object recognition](#2024-iclr-decoding-natural-images-from-eeg-for-object-recognition)
+      - [\[2024, ECCV\] MinD-3D: Reconstruct High-quality 3D objects in Human Brain](#2024-eccv-mind-3d-reconstruct-high-quality-3d-objects-in-human-brain)
   - [4. Datasets and Tools](#4-datasets-and-tools)
     - [4.1. BIDS(Brain Imaging Data Structure)](#41-bidsbrain-imaging-data-structure)
     - [4.2. Tools](#42-tools)
@@ -157,7 +159,7 @@ Here, we developed a novel fMRI-conditional video generative adversarial network
 **Cite as:**
 > Y. Takagi and S. Nishimoto, "High-resolution image reconstruction with latent diffusion models from human brain activity," 2023 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), Vancouver, BC, Canada, 2023, pp. 14453-14463, doi: 10.1109/CVPR52729.2023.01389.
 
-#### [2023, CVPR]Seeing Beyond the Brain: Conditional Diffusion Model with Sparse Masked Modeling for Vision Decoding
+#### [2023, CVPR] Seeing Beyond the Brain: Conditional Diffusion Model with Sparse Masked Modeling for Vision Decoding
 **Cite as:**
 > Chen Z, Qing J, Xiang T, et al. Seeing beyond the brain: Conditional diffusion model with sparse masked modeling for vision decoding[C]//Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. 2023: 22710-22720.
 
@@ -187,6 +189,8 @@ Here, we developed a novel fMRI-conditional video generative adversarial network
 
 研究者们展示了一种探索预训练多模态视频变换模型的有前景的方法，该方法借鉴了神经科学关于大脑中多模态信息处理的证据。他们利用观看热门电视节目的参与者的大脑记录，分析了在与单模态和多模态大脑区域的一致性对齐上，预训练的多模态视频变换器中的多模态连接和交互的效应。根据他们的发现，视觉元素能够增强在语言处理期间掩码预测的表现，这表明模型中的跨模态表征能够提升个别模态的功能。换句话说，如果语言比作文字游戏，视觉输入就像是游戏中的提示图片，能帮助更好地解答谜题。
 
+#### [2023, arXiv] 
+
 #### [2024, ICML] MindEye2: Shared-Subject Models Enable fMRI-To-Image With 1 Hour of Data
 **Cite as:**
 > Not yet
@@ -197,7 +201,10 @@ MindEye2 is first trained using data from 7 subjects in the Natural Scenes Datas
 **Cite as:**
 > Not yet
 
-
+#### [2024, ECCV] MinD-3D: Reconstruct High-quality 3D objects in Human Brain
+**Cite as:**
+> Not yet
+> 
 ## 4. Datasets and Tools
 ### 4.1. BIDS(Brain Imaging Data Structure)
 [BIDS](https://bids.neuroimaging.io/)

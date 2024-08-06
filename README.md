@@ -93,6 +93,7 @@ The code has been changed for this project.
 run `sbatch --gpus=2 -p gpu step1_run.sh`  for subj 01, 02, 05, 07
 
 **Step 2:**
+Change `train` or `test` in `step2_run.sh`  <br>
 run `sbatch --gpus=1 -p gpu step2_run.sh`
 
 ## Delete the Enviorment:

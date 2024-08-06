@@ -385,7 +385,7 @@ class NSD_DATA():
                         sample['tgt_subject']  = max_key_processed
 
                         # Extract the embedding and save it as a npy file
-                        # embedding = [uncond_embeddings, text_embeddings]
+                        # embedding = [uncond_embeddings, text_embeddings], every uncond_embedding is the same, text_embeddings come from the result of BLIP-2 feature_extractor's multimodal.
                         # embedding.shape = [2,77,768]
                         embedding = BLIP_Diffusion_model.generate_embedding(
                                 samples=sample,

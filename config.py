@@ -6,16 +6,7 @@ configs_dict = {
     'train_encoder' : {
         'batch_size' : 200, 
         'learning_rate' : 1e-4,
-        'epochs' : 300,
-    },
-
-    'roi' : {
-        'derived_type' : 'surface', # surface, volume
-        # surface-(corticalsulc, floc-bodies, floc-faces, floc-places, floc-words, 
-        #          HCP_MMP1, Kastner2015, nsdgeneral, prf-eccrois, prf-visualrois, streams)
-        # volume-(MTL, thalamus)
-        'roi_name' : 'corticalsulc', 
-        'threshold' : 0,
+        'epochs' : 10,
     },
 
     'blip_diffusion' :{

@@ -59,22 +59,38 @@ def make_paths_dict(subj_id : int) -> tuple[dict[str, dict[str, str]], dict[str,
 
     # ROIs
     rois_path_dict = {} # {key=surface or volume, value=dict{key=roi_name, value=list[roi_path]}}
-    for roi_type in os.listdir(rois_path):
-        roi_type_path = join_paths(rois_path, roi_type)
-        rois_path_dict[roi_type] = {}
-        for roi_name in os.listdir(roi_type_path):
-            roi_name_path = join_paths(roi_type_path, roi_name)
-            rois_path_dict[roi_type][roi_name] = [join_paths(roi_name_path, x) for x in os.listdir(roi_name_path)]
+    for derived_type in os.listdir(rois_path):
+        derived_type_path = join_paths(rois_path, derived_type)
+        rois_path_dict[derived_type] = {}
+        for roi_name in os.listdir(derived_type_path):
+            roi_name_path = join_paths(derived_type_path, roi_name)
+            rois_path_dict[derived_type][roi_name] = [join_paths(roi_name_path, x) for x in os.listdir(roi_name_path)]
 
     return train_trial_path_dict, test_trial_path_dict, rois_path_dict
 
-def masking_fmri_to_array(fmri_data : np.ndarray, mask_data : np.ndarray, threshold : int) -> np.ndarray:
+def masking_fmri_to_array(fmri_data : np.ndarray, mask_data : np.ndarray, threshold : int) -> np.ndarray | None:
+    """  
+    Applies a mask to the fmri_data array based on the mask_data and a given threshold.  
+    
+    Args:  
+        fmri_data (np.ndarray): The fMRI data array to be masked.  
+        mask_data (np.ndarray): The mask data array used to mask the fMRI data.  
+        threshold (int): The threshold value used to create the mask. The threshold determines   
+                         which voxels in the mask_data will be applied to the fMRI data.  
+    
+    Returns:  
+        np.ndarray: The fMRI data array after masking.  
+    
+    Raises:  
+        AssertionError: If the threshold is negative or greater than the maximum value in   
+                        mask_data and fmri_data.  
+    """
     mask_data = mask_data.astype(np.int16)
     # -1 = non-cortical voxels, 0 = Unknown
     assert threshold >= 0, print(f'threshold={threshold} should be non-negative.')
-    assert threshold <= max(np.max(mask_data), np.max(fmri_data)), print(f'threshold={threshold} should be less than or equal to the maximum value of mask_data={np.max(mask_data)} and fmri_data={np.max(fmri_data)}.')
-    mask_bool = mask_data > threshold
-    masked_data = fmri_data[mask_bool]
+    assert threshold <= np.max(mask_data), print(f'threshold={threshold} should be less than or equal to the maximum value of mask_data={np.max(mask_data)}.')
+    mask_bool = mask_data > threshold if threshold == 0 else mask_data == threshold
+    masked_data = fmri_data[mask_bool] if np.any(mask_bool) else None
     return masked_data
 
 class NSD_Dataset(Dataset):
@@ -115,3 +131,4 @@ class NSD_Dataset(Dataset):
     
     def __len__(self) -> int:
         return  len(self.trial_path_dict)
+
