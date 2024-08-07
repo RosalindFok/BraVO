@@ -5,7 +5,7 @@ import torch.nn as nn
 __all__ = [
     'device', 
     'load_blip_models',
-    'BraVO_Encoder', 'BraVO_Decoder'
+    'BraVO_Decoder'
 ]
 
 ########################
@@ -70,39 +70,39 @@ def load_blip_models(mode : str) -> tuple[nn.Module, dict, dict]:
 ######Brain Encoder#####
 ########################  
 
-class BraVO_Encoder(nn.Module):
-    """
-    Map the embedding of image + caption + category, into the whole brain activity.
-    """
-    def __init__(self, input_shape, output_shape):
-        super().__init__()
-        self.input_shape = input_shape
-        self.output_shape = output_shape
-        self.activate = nn.ReLU(inplace=True)
-        self.prob = nn.Sigmoid()
-        self.linear = nn.Linear(input_shape[2], output_shape[1]*output_shape[2])
-        self.conv = nn.Conv2d(in_channels=input_shape[0]*input_shape[1], out_channels=output_shape[0], kernel_size=3, stride=1, padding=1)
+# class BraVO_Encoder(nn.Module):
+#     """
+#     Map the embedding of image + caption + category, into the whole brain activity.
+#     """
+#     def __init__(self, input_shape, output_shape):
+#         super().__init__()
+#         self.input_shape = input_shape
+#         self.output_shape = output_shape
+#         self.activate = nn.ReLU(inplace=True)
+#         self.prob = nn.Sigmoid()
+#         self.linear = nn.Linear(input_shape[2], output_shape[1]*output_shape[2])
+#         self.conv = nn.Conv2d(in_channels=input_shape[0]*input_shape[1], out_channels=output_shape[0], kernel_size=3, stride=1, padding=1)
 
-    def forward(self, x):
-        # reshape the input embedding: [batch_size, 2, 77, 768]->[batch_size, 154, 768]->[batch_size*154, 768]
-        x = x.permute(0, 2, 1, 3).reshape(x.size(0), -1, x.size(-1)) 
-        batch_size, dim0, dim1 = x.shape
-        x = x.view(batch_size*dim0, dim1)
+#     def forward(self, x):
+#         # reshape the input embedding: [batch_size, 2, 77, 768]->[batch_size, 154, 768]->[batch_size*154, 768]
+#         x = x.permute(0, 2, 1, 3).reshape(x.size(0), -1, x.size(-1)) 
+#         batch_size, dim0, dim1 = x.shape
+#         x = x.view(batch_size*dim0, dim1)
 
-        # Linear layer: [batch_size*154, 768]->[batch_size, 154, 186, 148]
-        x = self.linear(x)
-        x = self.activate(x)
-        output_dim = x.shape[-1]
-        x = x.view(batch_size, dim0, output_dim)
-        x = x.reshape(x.size(0), x.size(1), self.output_shape[1], self.output_shape[2])
+#         # Linear layer: [batch_size*154, 768]->[batch_size, 154, 186, 148]
+#         x = self.linear(x)
+#         x = self.activate(x)
+#         output_dim = x.shape[-1]
+#         x = x.view(batch_size, dim0, output_dim)
+#         x = x.reshape(x.size(0), x.size(1), self.output_shape[1], self.output_shape[2])
 
-        # Conv layer: [batch_size, 154, 186, 148]->[batch_size, 145, 186, 148]
-        x = self.conv(x)
+#         # Conv layer: [batch_size, 154, 186, 148]->[batch_size, 145, 186, 148]
+#         x = self.conv(x)
 
-        # normalize
-        x = self.prob(x)
+#         # normalize
+#         x = self.prob(x)
 
-        return x
+#         return x
 
 
 
@@ -116,6 +116,8 @@ class BraVO_Decoder(nn.Module):
     """
     def __init__(self) -> None:
         super().__init__()
+        self.conv = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1)
+        self.prob = nn.Sigmoid()
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         x = x 

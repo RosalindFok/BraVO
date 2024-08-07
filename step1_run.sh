@@ -9,7 +9,7 @@ STATE_FILE="state_${BATCH_JOB_ID}.log"
 /usr/bin/touch ${STATE_FILE}
 
 # Execute the example script
-python make_nsd_data.py
+python make_NSD_data.py
 
 # Stop the GPU collection process
 echo "over" >> "${STATE_FILE}"

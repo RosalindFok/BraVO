@@ -606,9 +606,9 @@ class BlipDiffusion(BaseModel):
             # For classifier free guidance, we need to do two forward passes.
             # Here we concatenate the unconditional and text embeddings into a single batch
             # to avoid doing two forward passes
-            text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
+            multimodal_embeddings = torch.cat([uncond_embeddings, text_embeddings])
 
-        return text_embeddings
+        return multimodal_embeddings
 
     @torch.no_grad()
     def generate_image_via_embedding(

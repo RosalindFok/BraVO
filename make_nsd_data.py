@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 from config import configs_dict
 from models import device, load_blip_models
-from utils import NSD_dir_path, BraVO_saved_dir_path
+from utils import NSD_dir_path, NSD_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs
 
 # Load blip2 model
@@ -54,7 +54,7 @@ class NSD_DATA():
         self.coco_annotation_dir_path = join_paths(NSD_dir_path, 'nsddata_stimuli', 'stimuli', 'nsd', 'annotations')
 
         ## saved path of this subject
-        self.subject_saved_dir_path = join_paths(BraVO_saved_dir_path, self.subj+'_pairs')
+        self.subject_saved_dir_path = join_paths(NSD_saved_dir_path, self.subj+'_pairs')
         check_and_make_dirs(self.subject_saved_dir_path)
 
         # make fMRI-image-caption pairs
@@ -64,7 +64,7 @@ class NSD_DATA():
         start_time = time.time()
         data_frame = pd.read_csv(self.behav_responses_tsv_file_path, sep='\t', encoding='utf-8')
         subj_numpyINT64 = np.int64(self.subj[-1])
-        assert (data_frame['SUBJECT'] == subj_numpyINT64).all(), print(f'Subject id in tsv file is not correct.') # subj 1~8
+        assert (data_frame['SUBJECT'] == subj_numpyINT64).all(), f'Subject id in tsv file is not correct.' # subj 1~8
         data_frame.drop(columns=['SUBJECT'], inplace=True)
         # Some columns are not needed
         data_frame.drop(columns=['TIME'], inplace=True)
@@ -104,7 +104,7 @@ class NSD_DATA():
             file_name = f'betas_session{str(session_id).zfill(2)}.nii.gz'
             file_path = join_paths(betas_fithrf_GLMdenoise_RR_dir_path, file_name)
             header, data = read_nii_file(file_path) # dims=(145, 186, 148, 750); dtype=float64
-            assert np.iinfo(np.int16).min <= np.min(data) and np.iinfo(np.int16).max >= np.max(data), print(f'Data range is not within int16 range.')
+            assert np.iinfo(np.int16).min <= np.min(data) and np.iinfo(np.int16).max >= np.max(data), 'Data range is not within int16 range.'
             data = data.astype(np.int16)
             data = np.transpose(data, (3, 0, 1, 2)) # dims=(750, 145, 186, 148)
         else:
@@ -196,7 +196,7 @@ class NSD_DATA():
 
             # Surface/Volume ROIs
             roi_path_list = get_items_in_list_via_substrs(rois_path_list, tag) # itself, lh, rh
-            assert len(roi_path_list) == 3, print(f'There are {len(roi_path_list)} ROIs for {tag}.')
+            assert len(roi_path_list) == 3, f'There are {len(roi_path_list)} ROIs for {tag}.'
             for roi_path in roi_path_list:
                 shutil.copy(roi_path, saved_path)
 
@@ -208,14 +208,14 @@ class NSD_DATA():
                 label_path_list = get_items_in_list_via_substrs(templates_path_list, tag, 'ctab')
             else:
                 raise NotImplementedError(f'ROIs \' type: {ROIs_type} is not supported.')
-            assert len(label_path_list) == 1, print(f'There should be only one label file for {tag}, the label_path_list is {label_path_list}.')
+            assert len(label_path_list) == 1, f'There should be only one label file for {tag}, the label_path_list is {label_path_list}.'
             label_path = label_path_list[0]
             label_tags_dict = {-1 : 'non-cortical voxels'} # {key=label_id : value=name}
             with open(label_path, 'r') as f:
                 for line in f:
                     line = line.replace('\n', '').split(' ')
                     line = [s.replace('\t', '') for s in line if s]
-                    assert len(line) == 2, print(f'Invalid line: {line} of path = {label_path}')
+                    assert len(line) == 2, f'Invalid line: {line} of path = {label_path}'
                     label_tags_dict[int(line[0])] = line[-1]
             write_json_file(path = join_paths(saved_path, 'label_tags.json'), data = label_tags_dict)
 
@@ -318,10 +318,12 @@ class NSD_DATA():
         check_and_make_dirs(train_saved_dir_path)
         check_and_make_dirs(test_saved_dir_path)
 
+        check_uncond_embeddings = True
+        saved_uncond_embeddings = None
         for session_id in responses['SESSION'].unique():
             response = responses[responses['SESSION'] == session_id].to_numpy()
             space_type, nii_data = self.read_betas(session_id=session_id)
-            assert len(response) == len(nii_data), print(f'Number of responses and betas are not equal in session {session_id}.')
+            assert len(response) == len(nii_data), f'Number of responses and betas are not equal in session {session_id}.'
             
             if space_type == 'func1mm':
                 for trial, fmri in tqdm(zip(response, nii_data), total=len(nii_data), desc=f'Processing {self.subj} session {session_id}', leave=True):
@@ -385,15 +387,22 @@ class NSD_DATA():
                         sample['tgt_subject']  = max_key_processed
 
                         # Extract the embedding and save it as a npy file
-                        # embedding = [uncond_embeddings, text_embeddings], every uncond_embedding is the same, text_embeddings come from the result of BLIP-2 feature_extractor's multimodal.
+                        # embedding = [uncond_embeddings, multimodal_embeddings], every uncond_embedding is the same, text_embeddings come from the result of BLIP-2 feature_extractor's multimodal.
                         # embedding.shape = [2,77,768]
                         embedding = BLIP_Diffusion_model.generate_embedding(
                                 samples=sample,
                                 neg_prompt=configs_dict['blip_diffusion']['negative_prompt'],
                                 guidance_scale=configs_dict['blip_diffusion']['guidance_scale'],
                             )
-                        assert embedding.shape == (2, 77, 768), print(f'In {saved_path}, embedding shape is {embedding.shape}, not (2, 77, 768).')
-                        np.save(join_paths(saved_path, 'embedding.npy'), embedding.cpu().numpy())
+                        assert embedding.shape == (2, 77, 768), f'In {saved_path}, embedding shape is {embedding.shape}, not (2, 77, 768).'
+                        [uncond_embeddings, multimodal_embeddings] = embedding
+                        uncond_embeddings = uncond_embeddings.cpu().numpy()
+                        multimodal_embeddings = multimodal_embeddings.cpu().numpy()
+                        if check_uncond_embeddings:
+                            saved_uncond_embeddings = uncond_embeddings
+                            check_uncond_embeddings = False
+                        assert np.all(saved_uncond_embeddings == uncond_embeddings), f'Uncond embeddings are not the same for all sessions, {saved_uncond_embeddings} != {uncond_embeddings}.'
+                        np.save(join_paths(saved_path, 'multimodal_embedding.npy'), multimodal_embeddings)
 
                         # Save the strings to json file
                         json_data = {
@@ -411,7 +420,9 @@ class NSD_DATA():
 
             else:
                 raise NotImplementedError(f'Space type: {space_type} is not supported.')
-            
+        
+        np.save(join_paths(self.subject_saved_dir_path, 'uncond_embedding.npy'), saved_uncond_embeddings)
+
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
 
 # make pairs of NSD
