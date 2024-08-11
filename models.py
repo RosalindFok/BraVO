@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn  
 
 __all__ = [
-    'device', 
+    'device', 'get_GPU_memory_usage'
     'load_blip_models',
     'BraVO_Decoder'
 ]
@@ -27,7 +27,12 @@ def _setup_device_() -> torch.device:
 
 device = _setup_device_()
 
-
+def get_GPU_memory_usage() -> tuple[float, float]:
+    if torch.cuda.is_available():  
+        current_device = torch.cuda.current_device()  
+        mem_reserved = torch.cuda.memory_reserved(current_device) / (1024 ** 3)    # GB  
+        total_memory = torch.cuda.get_device_properties(current_device).total_memory / (1024 ** 3)  # GB  
+        return total_memory, mem_reserved
 
 ########################
 ###### Load BLIPs  #####
@@ -67,58 +72,73 @@ def load_blip_models(mode : str) -> tuple[nn.Module, dict, dict]:
 
 
 ########################
-######Brain Encoder#####
-########################  
-
-# class BraVO_Encoder(nn.Module):
-#     """
-#     Map the embedding of image + caption + category, into the whole brain activity.
-#     """
-#     def __init__(self, input_shape, output_shape):
-#         super().__init__()
-#         self.input_shape = input_shape
-#         self.output_shape = output_shape
-#         self.activate = nn.ReLU(inplace=True)
-#         self.prob = nn.Sigmoid()
-#         self.linear = nn.Linear(input_shape[2], output_shape[1]*output_shape[2])
-#         self.conv = nn.Conv2d(in_channels=input_shape[0]*input_shape[1], out_channels=output_shape[0], kernel_size=3, stride=1, padding=1)
-
-#     def forward(self, x):
-#         # reshape the input embedding: [batch_size, 2, 77, 768]->[batch_size, 154, 768]->[batch_size*154, 768]
-#         x = x.permute(0, 2, 1, 3).reshape(x.size(0), -1, x.size(-1)) 
-#         batch_size, dim0, dim1 = x.shape
-#         x = x.view(batch_size*dim0, dim1)
-
-#         # Linear layer: [batch_size*154, 768]->[batch_size, 154, 186, 148]
-#         x = self.linear(x)
-#         x = self.activate(x)
-#         output_dim = x.shape[-1]
-#         x = x.view(batch_size, dim0, output_dim)
-#         x = x.reshape(x.size(0), x.size(1), self.output_shape[1], self.output_shape[2])
-
-#         # Conv layer: [batch_size, 154, 186, 148]->[batch_size, 145, 186, 148]
-#         x = self.conv(x)
-
-#         # normalize
-#         x = self.prob(x)
-
-#         return x
-
-
-
-########################
 ######Brain Decoder#####
 ######################## 
 
+# class BraVO_Decoder(nn.Module):
+#     """
+#     Map the brain activity into the embedding of image or caption.
+#     """
+#     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
+#         super().__init__()
+#         self.input_shape = input_shape
+#         self.output_shape = output_shape
+#         self.linear = nn.Linear(input_shape[0], output_shape[0]*output_shape[1])
+#         self.conv_1 = nn.Conv2d(in_channels=1, out_channels=3, kernel_size=3, stride=1, padding=1)
+#         self.conv_2 = nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1)
+#         self.activate = nn.ReLU(inplace=True)
+
+#     def forward(self, x : torch.Tensor) -> torch.Tensor:
+#         x = self.linear(x)
+#         x = self.activate(x)
+#         x = x.view(x.size(0), *self.output_shape)
+#         x = x.unsqueeze(1)
+#         x = self.conv_1(x)
+#         x = self.activate(x)
+#         x = self.conv_2(x)
+#         x = self.activate(x)
+#         x = x.squeeze()
+#         return x
+    
 class BraVO_Decoder(nn.Module):
     """
-    Map the brain activity into the embedding of image or caption.
+    VAE: Map the brain activity into the embedding of image or caption.
     """
-    def __init__(self) -> None:
+    def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
         super().__init__()
-        self.conv = nn.Conv2d(in_channels=5, out_channels=5, kernel_size=3, stride=1, padding=1)
-        self.prob = nn.Sigmoid()
 
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
-        x = x 
-        return x
+        z_dim = input_shape[0] // 36
+        self.output_shape = output_shape
+        
+        self.Encoder = nn.Sequential(
+            nn.Linear(input_shape[0], z_dim*6),
+            nn.Tanh(),
+        )
+
+        self.Decoder = nn.Sequential(
+            nn.Linear(z_dim, z_dim*6),
+            nn.Tanh(),
+            nn.Linear(z_dim*6, z_dim*36),
+            nn.Tanh(),
+            nn.Linear(z_dim*36, output_shape[0]*output_shape[1]),
+            nn.Sigmoid(),
+        )
+
+        self.fc_mean = nn.Linear(z_dim*6, z_dim)
+        self.fc_log_var = nn.Linear(z_dim*6, z_dim)
+
+    def forward(self, x : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = self.Encoder(x)
+
+        z_mean = self.fc_mean(x)
+        z_log_var = self.fc_log_var(x)
+
+        # reparameterization
+        epsilon = torch.randn_like(z_log_var)
+        x = torch.exp(0.5 * z_log_var) * epsilon + z_mean
+
+        x = self.Decoder(x)
+        
+        x = x.view(x.size(0), *self.output_shape)
+
+        return x, z_mean, z_log_var

@@ -47,7 +47,7 @@ def make_paths_dict(subj_id : int, dataset_name : str
         find_and_join_paths = lambda trail_path, string: [os.path.join(trail_path, filename) for filename in os.listdir(trail_path) if string+'.' in filename]
         for index, trail_path in enumerate(trial_paths_list):
             trial_path_dict[index] = {}
-            for key in ['fmri', 'image','multimodal_embedding','strings']:
+            for key in ['fmri', 'image', 'canny', 'multimodal_embedding','strings']:
                 path_list = find_and_join_paths(trail_path=trail_path, string=key)
                 assert len(path_list) > 0, f'No {key} files found in {trail_path}.'
                 assert len(path_list) == 1, f'Multiple {key} files found in {trail_path}.'
@@ -132,8 +132,8 @@ def masking_fmri_to_array(fmri_data : np.ndarray, mask_data : np.ndarray, thresh
     mask_bool = np.isin(mask_data, thresholds)
     masked_data = fmri_data[mask_bool] if np.any(mask_bool) else None
     assert masked_data is not None, f'No voxels in thresholds={thresholds} found in mask_data.'
-    # Normalize the masked_data to [0, 1]
-    masked_data = (masked_data - np.min(masked_data)) / (np.max(masked_data) - np.min(masked_data))
+    # Normalize the masked data 
+    masked_data = (masked_data - np.min(masked_data)) / np.std(masked_data)
     return masked_data
 
 class NSD_Dataset(Dataset):
@@ -157,16 +157,18 @@ class NSD_Dataset(Dataset):
         # path
         fmri_path = self.trial_path_dict[index]['fmri']
         image_path = self.trial_path_dict[index]['image']
+        canny_path = self.trial_path_dict[index]['canny']
         multimodal_embedding_path = self.trial_path_dict[index]['multimodal_embedding']
         
         # data
         fmri_header, fmri_data = read_nii_file(fmri_path) # Shape of fmri_data: [145, 186, 148]
         masked_data = masking_fmri_to_array(fmri_data=fmri_data, mask_data=self.mask_data, thresholds=self.thresholds)
         image_data = np.array(Image.open(image_path))
+        canny_data = np.array(Image.open(canny_path))
         multimodal_embedding  = np.load(multimodal_embedding_path)
 
-        # Shape: masked_data([K]), image_data([425, 425, 3]), multimodal_embedding([77, 768])
-        return index, masked_data, image_data, multimodal_embedding
+        # Shape: masked_data([K]), image_data([425, 425, 3]), canny_data([425, 425]), multimodal_embedding([77, 768])
+        return index, masked_data, image_data, canny_data, multimodal_embedding
     
     def __len__(self) -> int:
         return  len(self.trial_path_dict)

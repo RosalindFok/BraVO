@@ -1,4 +1,5 @@
 import os
+import cv2
 import h5py
 import time
 import shutil
@@ -348,6 +349,10 @@ class NSD_DATA():
                         # image: BLIP-2 encodes via RGB
                         image = Image.fromarray(imgBrick[KID_73])
                         image.save(join_paths(saved_path, 'image.png'))
+                        # canny
+                        gray_image = cv2.cvtColor(imgBrick[KID_73], cv2.COLOR_RGB2GRAY)
+                        edges = cv2.Canny(gray_image, 100, 200)
+                        cv2.imwrite(join_paths(saved_path, 'canny.png'), edges)
 
                         # old_flag, captions and categories
                         OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old

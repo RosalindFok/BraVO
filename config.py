@@ -11,7 +11,7 @@ configs_dict = {
     },
 
     'train_decoder' : {
-        'batch_size' : 200, 
+        'batch_size' : 32, 
         'learning_rate' : 1e-4,
         'epochs' : 10,
     },
@@ -22,3 +22,13 @@ configs_dict = {
     },
 
 }
+
+blip_diffusion_coco_embedding_priori = { # COCO, only in the train set
+    'min_value' : -28.20389175415039,
+    'max_value' : 32.661075592041016,
+    'popt' : {
+        'amplitude' : 8.78480023e+08,
+        'mean' : -4.75681724e-02,
+        'standard_deviation' : -5.23968249e-01
+    }
+}  

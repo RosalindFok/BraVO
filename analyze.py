@@ -1,140 +1,90 @@
+import os
+import time
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+
 from tqdm import tqdm
-from collections import Counter  
+from scipy.optimize import curve_fit  
 
-hyphen_string = '-'*16
-concat_string_with_hyphen = lambda x: print(''.join([hyphen_string, x, hyphen_string]))
+from utils import join_paths, analyzed_results_dir_path
 
-def analyze_volume(masking_result : dict[str, dict[str : dict[str : dict[str : float]]]]
-                   ) -> dict[str : dict[str : int]]:
-    concat_string_with_hyphen(analyze_volume.__name__)
-    volume_derived_result = {'MSE':{'MTL':0,'thalamus':0}, 'MAE':{'MTL':0,'thalamus':0}}
-    for index, rois_and_category in tqdm(masking_result.items(), desc=f'Analyzing volume', leave=True):
-        for derived_type_or_general_category, values in rois_and_category.items():
-            if derived_type_or_general_category == 'volume':
-                MTL_mse = values['MTL']['whole']['MSE']
-                MTL_mae = values['MTL']['whole']['MAE']
-                thalamus_mse = values['thalamus']['whole']['MSE']
-                thalamus_mae = values['thalamus']['whole']['MAE']
-                # MSE
-                if MTL_mse < thalamus_mse:
-                    volume_derived_result['MSE']['MTL'] += 1
-                else: 
-                    volume_derived_result['MSE']['thalamus'] += 1
-                # MAE
-                if MTL_mae < thalamus_mae:
-                    volume_derived_result['MAE']['MTL'] += 1
-                else: 
-                    volume_derived_result['MAE']['thalamus'] += 1
-    concat_string_with_hyphen('End')
-    return volume_derived_result
+def analyze_blip_diffusion_embeddings_space(dataloader : torch.utils.data.DataLoader, mode : str) -> None:
+    embedding_min_val, embedding_max_val = 0, 0
+    multimodal_embedding_flattened = torch.tensor([], dtype=torch.float32) 
+    masked_min_val, masked_max_val = 0, 0
+    masked_data_flattened = torch.tensor([], dtype=torch.float32) 
 
+    for index, masked_data, image_data, canny_data, multimodal_embedding in tqdm(dataloader, desc='Analyzing BLIP Diffusion Embeddings Space', leave=True):
+        # multimodal_embedding
+        current_min = multimodal_embedding.min().item()
+        current_max = multimodal_embedding.max().item()
+        embedding_min_val = min(embedding_min_val, current_min)
+        embedding_max_val = max(embedding_max_val, current_max)
+        multimodal_embedding_flattened = torch.cat((multimodal_embedding_flattened, multimodal_embedding.flatten()), dim=0)
+        # masked_data
+        current_min = masked_data.min().item()
+        current_max = masked_data.max().item()
+        masked_min_val = min(masked_min_val, current_min)
+        masked_max_val = max(masked_max_val, current_max)
+        masked_data_flattened = torch.cat((masked_data_flattened, masked_data.flatten()), dim=0)
 
-def analyze_volume_MTL(masking_result : dict[str, dict[str : dict[str : dict[str : float]]]]
-                       ) -> dict[int : dict[str : any]]:
-    concat_string_with_hyphen(analyze_volume_MTL.__name__)
-    mtl_result = {} # {key=index, value=dict}
-    for index, rois_and_category in tqdm(masking_result.items(), desc=f'Analyzing volume MTL', leave=True):
-        index = int(index)
-        mtl_result[index] = {} # {key=roi_name, value=dict}
-        for derived_type_or_general_category, values in rois_and_category.items():
-            # region of ROIs
-            if derived_type_or_general_category == 'volume':
-                for rois_name, regions in values.items():
-                    if not rois_name == 'MTL':
-                        continue
-                    min_mse_region, min_mae_region = '', ''
-                    min_mse, min_mae = 1e9, 1e9
-                    for region_name, metrics in regions.items():
-                        if region_name == 'whole':
-                            continue
-                        else:
-                            if metrics['MSE'] < min_mse:
-                                min_mse = metrics['MSE']
-                                min_mse_region = region_name
-                            if metrics['MAE'] < min_mae:
-                                min_mae = metrics['MAE']
-                                min_mae_region = region_name
-                    mtl_result[index] = {'MSE':min_mse_region, 'MAE':min_mae_region}
-            # category
-            elif derived_type_or_general_category not in ['volume', 'surface']: 
-                mtl_result[index]['supercategory'] = derived_type_or_general_category
-                mtl_result[index]['category'] = values
+    print(f"Minimum value of embedding: {embedding_min_val}")
+    print(f"Maximum value of embedding: {embedding_max_val}")
+
+    print(f"Minimum value of masked data: {masked_min_val}")
+    print(f"Maximum value of masked data: {masked_max_val}")
+
+    def __gaussian__(x, a, b, c):  
+        return a * np.exp(-(x - b)**2 / (2 * c**2))  
+
+    for tag, data in zip(['multimodal_embedding', 'masked_data'], [multimodal_embedding_flattened, masked_data_flattened]):
+        start_time = time.time()
+        svg_path = join_paths(analyzed_results_dir_path, f'{mode}_{tag}.svg')
+        print(f'Plotting: {svg_path}')
+        data = data.cpu().numpy().astype(int)
+        unique_values, counts = np.unique(data, return_counts=True)
+        a_initial = np.max(counts)
+        b_initial = unique_values[np.argmax(counts)]
+        c_initial = np.std(unique_values)
+        popt, pcov = curve_fit(__gaussian__, unique_values, counts, p0=[a_initial, b_initial, c_initial])  
+        plt.figure(figsize=(10, 6))  
+        plt.plot(unique_values, counts, marker='o')  
+        plt.plot(unique_values, __gaussian__(unique_values, *popt), 'r--')  
+        plt.title("Value Frequency Distribution")  
+        plt.xlabel("Value")  
+        plt.ylabel("Frequency")  
+        plt.grid(True)  
+        plt.savefig(svg_path, format='svg') 
+        print(f'Optimized parameters (popt) of {tag}: {popt}')
+        print(f'Average of pcov: {np.mean(pcov)}')  
+        end_time = time.time()
+        print(f'It took {end_time - start_time} seconds to plot and fit: {svg_path}')
+
+def analyze_test_results(saved_test_results_dir_path : str) -> None:
+    if not os.path.exists(saved_test_results_dir_path) or len(os.listdir(saved_test_results_dir_path)) == 0:
+        print(f'No test results found in {saved_test_results_dir_path}')
+        return None 
     
-    # the relationship between category and region of MTL
-    mse_region_list, mae_region_list, supercategory_list = [], [], []
-    for index, regions_category in mtl_result.items():
-        for key, value in regions_category.items():
-            if key == 'MSE':
-                mse_region_list.append(value)
-            elif key == 'MAE':
-                mae_region_list.append(value)
-            elif key == 'supercategory':
-                supercategory_list.append(value)
-    assert len(mse_region_list) == len(mae_region_list) == len(supercategory_list), 'The length of lists is not equal'
-    # count the frequency of each element in the lists
-    element_count = Counter(mse_region_list)
-    element_count = Counter(mae_region_list)
+    start_time = time.time()
+    data_flattend = np.array([])
+    for file in tqdm(os.listdir(saved_test_results_dir_path), desc='Analyzing Test Results', leave=True):
+        file_path = os.path.join(saved_test_results_dir_path, file)
+        if 'pred' in file:
+            data = np.load(file_path, allow_pickle=True)
+            data_flattend = np.concatenate((data_flattend, data.flatten()))
 
-    concat_string_with_hyphen('End')
-    return mtl_result
-
-def analyze_volume_thalamus(masking_result : dict[str, dict[str : dict[str : dict[str : float]]]]
-                            ) -> dict[str : dict[str : float]]:
-    concat_string_with_hyphen(analyze_volume_thalamus.__name__)
-    thalamus_result = {} # {key=index, value=dict}
-    for index, rois_and_category in tqdm(masking_result.items(), desc=f'Analyzing volume thalamus', leave=True):
-        for derived_type_or_general_category, values in rois_and_category.items():
-            # region of ROIs
-            if derived_type_or_general_category == 'volume':
-                for rois_name, regions in values.items():
-                    if not rois_name == 'thalamus':
-                        continue
-                    for region_name, metrics in regions.items():
-                        if region_name == 'whole':
-                            continue
-                        if region_name in thalamus_result:
-                            thalamus_result[region_name]['MSE'] += metrics['MSE']
-                            thalamus_result[region_name]['MAE'] += metrics['MAE']
-                        else:
-                            thalamus_result[region_name] = {'MSE':metrics['MSE'], 'MAE':metrics['MAE']}
-    print('\t\tMSE\tMAE')
-    for region_name, metrics in thalamus_result.items():
-        tab = '\t\t' if len(region_name) < 8 else '\t'
-        print(f"{region_name}{tab}{(metrics['MSE'])/len(masking_result):.4f}\t{(metrics['MAE'])/len(masking_result):.4f}")  
-    concat_string_with_hyphen('End')
-    return thalamus_result
-
-def analyze_surface_floc(masking_result : dict[str, dict[str : dict[str : dict[str : float]]]]
-                         ) -> None:
-    concat_string_with_hyphen(analyze_surface_floc.__name__)
-    supercategory_list, mse_rois_list, mae_rois_list = [], [], []
-    for index, rois_and_category in tqdm(masking_result.items(), desc=f'Analyzing surface floc', leave=True):
-        for derived_type_or_general_category, values in rois_and_category.items():
-            # region of ROIs
-            if derived_type_or_general_category == 'surface':
-                mse_roi, mae_roi = '', ''
-                min_mse, min_mae = 1e9, 1e9
-                for rois_name, regions in values.items():
-                    if not 'floc-' in rois_name:
-                        continue
-                    else:
-                        for region_name, metrics in regions.items():
-                            if region_name == 'whole':
-                                mse, mae = metrics['MSE'], metrics['MAE']
-                                if mse < min_mse:
-                                    min_mse = mse
-                                    mse_roi = rois_name
-                                if mae < min_mae:
-                                    min_mae = mae
-                                    mae_roi = rois_name
-                mse_rois_list.append(mse_roi)
-                mae_rois_list.append(mae_roi)
-            # category
-            elif derived_type_or_general_category not in ['volume', 'surface']: 
-                supercategory_list.append(derived_type_or_general_category)
+    print('Plotting Test Results')
+    svg_path = join_paths(analyzed_results_dir_path, f'test_results.svg')
+    data_flattend = data_flattend.astype(int).astype(int)
+    unique_values, counts = np.unique(data_flattend, return_counts=True) 
+    plt.figure(figsize=(10, 6))  
+    plt.plot(unique_values, counts, marker='o')  
+    plt.title("Value Frequency Distribution")  
+    plt.xlabel("Value")  
+    plt.ylabel("Frequency")  
+    plt.grid(True)  
+    plt.savefig(svg_path, format='svg') 
+    end_time = time.time()
+    print(f'It took {end_time - start_time} seconds to plot and fit: {svg_path}')
     
-    # 
-    for x, y, z in zip(supercategory_list, mse_rois_list, mae_rois_list):
-        print(f"{x}\t{y}\t{z}")
-
-    concat_string_with_hyphen('End')

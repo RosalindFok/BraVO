@@ -337,6 +337,7 @@ class BlipDiffusion(BaseModel):
 
     def _forward_prompt_embeddings(self, input_image, src_subject, prompt):
         # 1. extract BLIP query features and proj to text space -> (bs, 32, 768)
+        # In BraVO, it is (bs, 16, 768)
         query_embeds = self.forward_ctx_embeddings(input_image, src_subject)
 
         # 2. embeddings for prompt, with query_embeds as context
@@ -345,8 +346,8 @@ class BlipDiffusion(BaseModel):
             input_ids=tokenized_prompt.input_ids,
             ctx_embeddings=query_embeds,
             ctx_begin_pos=[self._CTX_BEGIN_POS],
-        )[0]
-
+        )[0] # Shape = (bs, 77, 768)
+       
         return text_embeddings
 
     @torch.no_grad()
