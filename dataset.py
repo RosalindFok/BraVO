@@ -114,26 +114,11 @@ def fetch_roi_files_and_labels(derived_type : str, roi_name : str, thresholds : 
 
 def masking_fmri_to_array(fmri_data : np.ndarray, mask_data : np.ndarray, thresholds : list[int]) -> np.ndarray:
     """  
-    This function applies a mask to fMRI data and extracts the relevant data points based on the specified thresholds.  
-    It ensures that the extracted data is normalized between 0 and 1.  
-    
-    Args:  
-        fmri_data (np.ndarray): The fMRI data as a NumPy array.  
-        mask_data (np.ndarray): The mask data as a NumPy array.  
-        thresholds (list[int]): A list of integer threshold values to apply to the mask data.  
-        
-    Returns:  
-        np.ndarray: A normalized NumPy array of the fMRI data corresponding to the mask.  
-        
-    Raises:  
-        AssertionError: If no voxels in the specified thresholds are found in mask_data.  
     """ 
     mask_data = mask_data.astype(np.int16)
     mask_bool = np.isin(mask_data, thresholds)
     masked_data = fmri_data[mask_bool] if np.any(mask_bool) else None
     assert masked_data is not None, f'No voxels in thresholds={thresholds} found in mask_data.'
-    # Normalize the masked data 
-    masked_data = (masked_data - np.min(masked_data)) / np.std(masked_data)
     return masked_data
 
 class NSD_Dataset(Dataset):

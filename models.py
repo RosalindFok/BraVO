@@ -104,8 +104,15 @@ class BraVO_Decoder(nn.Module):
     """
     VAE: Map the brain activity into the embedding of image or caption.
     """
-    def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
+    def __init__(self, input_shape : torch.Size, output_shape : torch.Size, 
+                 input_mean : float, input_std: float,
+                 priori_mean : float, priori_std: float
+                 ) -> None:
         super().__init__()
+        self.input_mean = input_mean
+        self.input_std = input_std
+        self.priori_mean = priori_mean
+        self.priori_std = priori_std
 
         z_dim = input_shape[0] // 36
         self.output_shape = output_shape
@@ -128,6 +135,8 @@ class BraVO_Decoder(nn.Module):
         self.fc_log_var = nn.Linear(z_dim*6, z_dim)
 
     def forward(self, x : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        x = (x - self.input_mean) / self.input_std
+
         x = self.Encoder(x)
 
         z_mean = self.fc_mean(x)
@@ -138,7 +147,11 @@ class BraVO_Decoder(nn.Module):
         x = torch.exp(0.5 * z_log_var) * epsilon + z_mean
 
         x = self.Decoder(x)
-        
+
+        mean_x = torch.mean(x, dim=1, keepdim=True)
+        std_x = torch.std(x, dim=1, keepdim=True)
+        x = ((x - mean_x) / std_x) * self.priori_std + self.priori_mean
+
         x = x.view(x.size(0), *self.output_shape)
 
         return x, z_mean, z_log_var

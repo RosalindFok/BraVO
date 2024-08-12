@@ -6,9 +6,6 @@ import json
 import numpy as np
 import nibabel as nib
 
-__all__ = ['join_paths', 'read_nii_file', 'save_nii_file', 'check_and_make_dirs', 'read_json_file', 'write_json_file', 'merge_dicts_if_no_conflict'
-           'NSD_dir_path', 'BraVO_saved_dir_path']
-
 ''' utility functions '''
 join_paths = lambda *args: os.path.abspath(os.path.join(*args))
 read_nii_file = lambda path: [nib.load(path).header, nib.load(path).get_fdata()]
@@ -105,9 +102,11 @@ NSD_dir_path = join_paths('..', 'dataset', 'NSD')
 fMRI_Shape_dir_path = join_paths('..', 'dataset', 'fMRI_Shape')
 BraVO_saved_dir_path = join_paths('..', 'BraVO_saved')
 check_and_make_dirs(BraVO_saved_dir_path)
-NSD_saved_dir_path = join_paths(BraVO_saved_dir_path, 'NSD_saved')
+NSD_saved_dir_path = join_paths(BraVO_saved_dir_path, 'NSD_preprocessed_pairs')
 check_and_make_dirs(NSD_saved_dir_path)
-fmrishape_saved_dir_path = join_paths(BraVO_saved_dir_path, 'fMRI_Shape_saved')
+fmrishape_saved_dir_path = join_paths(BraVO_saved_dir_path, 'fMRIShape_preprocessed_pairs')
 check_and_make_dirs(fmrishape_saved_dir_path)
-analyzed_results_dir_path = join_paths(BraVO_saved_dir_path, 'analyzed_results')
-check_and_make_dirs(analyzed_results_dir_path)
+train_results_dir_path = join_paths(BraVO_saved_dir_path, 'train_results')
+check_and_make_dirs(train_results_dir_path)
+test_results_dir_path = join_paths(BraVO_saved_dir_path, 'test_results')
+check_and_make_dirs(test_results_dir_path)
