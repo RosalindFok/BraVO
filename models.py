@@ -75,83 +75,70 @@ def load_blip_models(mode : str) -> tuple[nn.Module, dict, dict]:
 ######Brain Decoder#####
 ######################## 
 
-# class BraVO_Decoder(nn.Module):
-#     """
-#     Map the brain activity into the embedding of image or caption.
-#     """
-#     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
-#         super().__init__()
-#         self.input_shape = input_shape
-#         self.output_shape = output_shape
-#         self.linear = nn.Linear(input_shape[0], output_shape[0]*output_shape[1])
-#         self.conv_1 = nn.Conv2d(in_channels=1, out_channels=3, kernel_size=3, stride=1, padding=1)
-#         self.conv_2 = nn.Conv2d(in_channels=3, out_channels=1, kernel_size=3, stride=1, padding=1)
-#         self.activate = nn.ReLU(inplace=True)
+class Bijection_ND_CDF(nn.Module):
+    """
+    N(miu, sigma) <--> CDF[0, 1] 
+    """    
+    def __init__(self, forward_mean  : float = 0.0, forward_std  : float = 1.0, 
+                       backward_mean : float = 0.0, backward_std : float = 1.0) -> None:
+        super().__init__()
+        self.forward_mean = forward_mean
+        self.forward_std = forward_std
+        self.backward_mean = backward_mean
+        self.backward_std = backward_std
 
-#     def forward(self, x : torch.Tensor) -> torch.Tensor:
-#         x = self.linear(x)
-#         x = self.activate(x)
-#         x = x.view(x.size(0), *self.output_shape)
-#         x = x.unsqueeze(1)
-#         x = self.conv_1(x)
-#         x = self.activate(x)
-#         x = self.conv_2(x)
-#         x = self.activate(x)
-#         x = x.squeeze()
-#         return x
+    # Map the normal distribution to a Cumulative Distribution Function between [0,1]
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        # Standardize the tensor    
+        x = (x - self.forward_mean) / self.forward_std
+        # Compute the CDF of the standard normal distribution
+        x = 0.5 * (1 + torch.erf(x / torch.sqrt(torch.tensor(2.0, device=x.device))))
+        return x
+
+    # Map the Cumulative Distribution Function between [0,1] to a normal distribution ~ N(miu, sigma)
+    def backward(self, x : torch.Tensor) -> torch.Tensor:
+        # Inverse CDF (Probit function)  
+        x = torch.distributions.Normal(0, 1).icdf(x)  
+        # Transform to new normal distribution with priori_mean and priori_std  
+        x = self.backward_mean + self.backward_std * x  
+        return x 
     
 class BraVO_Decoder(nn.Module):
     """
     VAE: Map the brain activity into the embedding of image or caption.
     """
-    def __init__(self, input_shape : torch.Size, output_shape : torch.Size, 
-                 input_mean : float, input_std: float,
-                 priori_mean : float, priori_std: float
-                 ) -> None:
+    def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
         super().__init__()
-        self.input_mean = input_mean
-        self.input_std = input_std
-        self.priori_mean = priori_mean
-        self.priori_std = priori_std
 
         z_dim = input_shape[0] // 36
         self.output_shape = output_shape
         
         self.Encoder = nn.Sequential(
             nn.Linear(input_shape[0], z_dim*6),
-            nn.Tanh(),
+            nn.ReLU(),
         )
 
         self.Decoder = nn.Sequential(
             nn.Linear(z_dim, z_dim*6),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(z_dim*6, z_dim*36),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(z_dim*36, output_shape[0]*output_shape[1]),
             nn.Sigmoid(),
         )
 
         self.fc_mean = nn.Linear(z_dim*6, z_dim)
         self.fc_log_var = nn.Linear(z_dim*6, z_dim)
+    
+    def reparameterization(self, mean : torch.Tensor, log_var : torch.Tensor) -> torch.Tensor:
+        epsilon = torch.randn_like(log_var)
+        return torch.exp(0.5 * log_var) * epsilon + mean
 
     def forward(self, x : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        x = (x - self.input_mean) / self.input_std
-
         x = self.Encoder(x)
-
         z_mean = self.fc_mean(x)
         z_log_var = self.fc_log_var(x)
-
-        # reparameterization
-        epsilon = torch.randn_like(z_log_var)
-        x = torch.exp(0.5 * z_log_var) * epsilon + z_mean
-
+        x = self.reparameterization(mean=z_mean, log_var=z_log_var)
         x = self.Decoder(x)
-
-        mean_x = torch.mean(x, dim=1, keepdim=True)
-        std_x = torch.std(x, dim=1, keepdim=True)
-        x = ((x - mean_x) / std_x) * self.priori_std + self.priori_mean
-
         x = x.view(x.size(0), *self.output_shape)
-
         return x, z_mean, z_log_var

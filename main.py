@@ -6,12 +6,14 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
-# from losses import VAE_loss
+from losses import VAE_loss
 from config import configs_dict
-from models import device, get_GPU_memory_usage, BraVO_Decoder
+from models import load_blip_models
+from analyze import analyze_embeddingPriori_and_maskedBrain
 from dataset import make_paths_dict, fetch_roi_files_and_labels, NSD_Dataset
-from analyze import analyze_embeddingPriori_and_maskedBrain, analyze_test_results
-from utils import join_paths, train_results_dir_path, test_results_dir_path, check_and_make_dirs, write_json_file, read_json_file
+from models import device, get_GPU_memory_usage, BraVO_Decoder, Bijection_ND_CDF
+from utils import train_results_dir_path, test_results_dir_path
+from utils import join_paths, check_and_make_dirs, write_json_file, read_json_file
 
 
 def train(
@@ -19,7 +21,11 @@ def train(
     model : torch.nn.Module,
     loss_fn : torch.nn.modules.loss._Loss,
     optimizer : torch.optim.Optimizer,
-    train_dataloader : DataLoader
+    train_dataloader : DataLoader,
+    maskeddata_mean : float,
+    maskeddata_std  : float,
+    embeddings_mean : float,
+    embeddings_std  : float
 ) -> tuple[torch.nn.Module, float, float, float]:
     """
     """
@@ -32,11 +38,15 @@ def train(
         tensors = [masked_data, image_data, canny_data, multimodal_embedding]
         tensors = list(map(lambda t: t.to(device=device, dtype=torch.float32), tensors))
         masked_data, image_data, canny_data, multimodal_embedding = tensors
+        # Map masked_data and multimodal_embedding into its CDF[0, 1]
+        masked_data = Bijection_ND_CDF(forward_mean=maskeddata_mean, 
+                                       forward_std=maskeddata_std).eval()(masked_data)
+        multimodal_embedding = Bijection_ND_CDF(forward_mean=embeddings_mean, 
+                                                forward_std=embeddings_std).eval()(multimodal_embedding)
         # Forward
         pred_embedding, mean, log_var = model(masked_data)
         # Compute loss
-        # loss = loss_fn(input=pred_embedding, target=multimodal_embedding, mean=mean, log_var=log_var)
-        loss = loss_fn(pred_embedding, multimodal_embedding)
+        loss = loss_fn(input=pred_embedding, target=multimodal_embedding, mean=mean, log_var=log_var)
         assert not torch.isnan(loss), 'loss is nan, stop training!'
         train_loss.append(loss.item())
         # 3 steps of back propagation
@@ -51,16 +61,17 @@ def train(
 def test(
     device : torch.device,
     model : torch.nn.Module,
-    metrics_fn : dict[str, torch.nn.Module],
     test_dataloader : DataLoader,
     saved_test_results_dir_path : str,
-    target_min : float,
-    target_max : float        
-) -> tuple[float, float]:
+    maskeddata_mean : float,
+    maskeddata_std  : float,
+    embeddings_mean : float,
+    embeddings_std  : float
+) -> tuple[float, float, float]:
     """
     """
     model.eval()
-    metrics = {key : [] for key in metrics_fn.keys()}
+    metrics_dict = {} # {key=index, value=Euclidean distance}
     mem_reserved_list = []
     with torch.no_grad():
         for index, masked_data, image_data, canny_data, multimodal_embedding in tqdm(test_dataloader, desc='Testing', leave=True):
@@ -68,28 +79,31 @@ def test(
             tensors = [masked_data, image_data, canny_data, multimodal_embedding]
             tensors = list(map(lambda t: t.to(device=device, dtype=torch.float32), tensors))
             masked_data, image_data, canny_data, multimodal_embedding = tensors
+            # Map masked_data into its CDF[0, 1]
+            masked_data = Bijection_ND_CDF(forward_mean=maskeddata_mean, 
+                                           forward_std=maskeddata_std).eval()(masked_data)
             # Forward
-            pred_embedding, mean, log_var  = model(masked_data)
-            # Compute loss
-            for metric_name in metrics_fn:
-                value = metrics_fn[metric_name](pred_embedding, multimodal_embedding)
-                metrics[metric_name].append(value.item())
+            pred_embedding, _, _  = model(masked_data)
+            # Map pred_embedding into original space
+            pred_embedding = Bijection_ND_CDF(backward_mean=embeddings_mean, 
+                                              backward_std=embeddings_std).eval().backward(pred_embedding)
+            # Compute metric: Euclidean distance
+            squared_diff = (pred_embedding - multimodal_embedding)**2
+            distances = torch.sqrt(torch.sum(squared_diff, dim=[1,2]))
+            for idx, dst in zip(index, distances):
+                metrics_dict[idx.item()] = dst.item()
             # save the pred_embedding
             index = index.cpu().numpy()
-            multimodal_embedding = multimodal_embedding.cpu().numpy()
             pred_embedding = pred_embedding.cpu().numpy()
-            for idx, fmri, pred in zip(index, multimodal_embedding, pred_embedding):
-                np.save(join_paths(saved_test_results_dir_path, f'{str(idx)}_true.npy'), fmri)
-                np.save(join_paths(saved_test_results_dir_path, f'{str(idx)}_pred.npy'), pred)
+            for idx, pred in zip(index, pred_embedding):
+                saved_path = join_paths(saved_test_results_dir_path, str(idx))
+                check_and_make_dirs(saved_path)
+                np.save(join_paths(saved_path, f'pred_multimodal_embedding.npy'), pred)
 
-    for metric_name in metrics:
-        value = sum(metrics[metric_name])/len(metrics[metric_name])
-        print(f'{metric_name}Loss: {value}')
-    
     # Monitor GPU memory usage
     total_memory, mem_reserved = get_GPU_memory_usage()
     mem_reserved_list.append(mem_reserved)
-    return total_memory, max(mem_reserved_list)
+    return sum(list(metrics_dict.values()))/len(metrics_dict), total_memory, max(mem_reserved_list)
 
 def main() -> None:
     ## Train or Test
@@ -111,6 +125,10 @@ def main() -> None:
     derived_type = configs_dict['NSD_ROIs']['derived_type']
     roi_name = configs_dict['NSD_ROIs']['roi_name']
     thresholds = configs_dict['NSD_ROIs']['thresholds']
+    # blip_diffusion
+    iter_seed = configs_dict['blip_diffusion']['iter_seed']
+    guidance_scale = configs_dict['blip_diffusion']['guidance_scale']
+    num_inference_steps = configs_dict['blip_diffusion']['num_inference_steps']
     
     ## Data
     train_trial_path_dict, test_trial_path_dict, rois_path_dict, uncond_embedding = make_paths_dict(subj_id=subj_id, dataset_name=dataset_name)
@@ -124,7 +142,7 @@ def main() -> None:
     saved_subj_train_result_dir_path = join_paths(train_results_dir_path, dataset_name, f'subj{str(subj_id).zfill(2)}', f'{derived_type}_{roi_name}', f'{labels_string}')
     check_and_make_dirs(saved_subj_train_result_dir_path)
     # the path of saving the trained model
-    saved_model_path = join_paths(saved_subj_train_result_dir_path, f'ep-{epochs}_lr-{learning_rate}_bs-{batch_size}.pth')
+    saved_model_path = join_paths(saved_subj_train_result_dir_path, f'ep-{epochs}_bs-{batch_size}.pth')
     # the path of saving the priori
     saved_priori_path = join_paths(saved_subj_train_result_dir_path, r'priori.json')
     # path to save the prediected fMRI(whole brain)
@@ -139,26 +157,24 @@ def main() -> None:
             write_json_file(path=saved_priori_path, data=priori)
         else:
             priori = read_json_file(path=saved_priori_path)
-        masked_mean = priori['masked_data']['raw']['mean']
-        masked_std = priori['masked_data']['raw']['std']
-        priori_mean = priori['multimodal_embedding']['raw']['mean']
-        priori_std = priori['multimodal_embedding']['raw']['std']
+        maskeddata_mean = priori['masked_data']['raw']['mean']
+        maskeddata_std = priori['masked_data']['raw']['std']
+        embeddings_mean = priori['multimodal_embedding']['popt']['mean']
+        embeddings_std = priori['multimodal_embedding']['popt']['std']
         # Network
         light_loader = next(iter(test_dataloader))
         input_shape  = light_loader[1].shape[1:]  # The shape of masked_data
         output_shape = light_loader[-1].shape[1:] # The shape of multimodal_embedding
-        bravo_decoder_model = BraVO_Decoder(input_shape=input_shape, output_shape=output_shape,
-                                            input_mean=masked_mean, input_std=masked_std,
-                                            priori_mean=priori_mean, priori_std=priori_std)
+        bravo_decoder_model = BraVO_Decoder(input_shape=input_shape, output_shape=output_shape)
         print(bravo_decoder_model)
         trainable_parameters = sum(p.numel() for p in bravo_decoder_model.parameters() if p.requires_grad)
         bravo_decoder_model = bravo_decoder_model.to(device=device)
         print(f'The number of trainable parametes is {trainable_parameters}.')
         # Loss function
-        loss_of_brain_decoder = torch.nn.MSELoss()#VAE_loss(w_mse=1, w_kld=1)
+        loss_of_brain_decoder = VAE_loss(w_mse=1, w_kld=1)
         # Optimizer
         optimizer_of_brain_decoder = torch.optim.Adam(bravo_decoder_model.parameters(), lr=learning_rate) 
-    elif task in ['analyze']:
+    elif task in ['generate', 'generation']:
         pass
 
     # Train
@@ -166,11 +182,19 @@ def main() -> None:
         print(f'Training Brain Decoder for {epochs} epochs.')
         for epoch in range(epochs):
             start_time = time.time()
+            lr = learning_rate*((1-epoch/epochs)**0.9)
+            for param_group in optimizer_of_brain_decoder.param_groups:
+                param_group['lr'] = lr
             trained_model, train_loss, total_memory, mem_reserved = train(device=device, 
                                                                           model=bravo_decoder_model, 
                                                                           loss_fn=loss_of_brain_decoder, 
                                                                           optimizer=optimizer_of_brain_decoder, 
-                                                                          train_dataloader=train_dataloader)
+                                                                          train_dataloader=train_dataloader,
+                                                                          maskeddata_mean=maskeddata_mean,
+                                                                          maskeddata_std=maskeddata_std,
+                                                                          embeddings_mean=embeddings_mean,
+                                                                          embeddings_std=embeddings_std
+                                                                    )
             end_time = time.time()
             print(f'Epoch {epoch+1}/{epochs}, {loss_of_brain_decoder.__class__.__name__}: {train_loss:.4f}, Time: {(end_time-start_time)/60:.2f} minutes.')
             print(f'GPU memory usage: {mem_reserved:.2f} GB / {total_memory:.2f} GB.')
@@ -181,22 +205,39 @@ def main() -> None:
         print(f'Testing Brain Decoder.')
         # load the trained model
         bravo_decoder_model.load_state_dict(torch.load(saved_model_path))
-        metrics_fn = {
-            'MSE' : torch.nn.MSELoss(),
-            'MAE' : torch.nn.L1Loss(),
-        }
-        total_memory, mem_reserved = test(device=device, 
+        Euclidean_distance, total_memory, mem_reserved = test(device=device, 
                                           model=bravo_decoder_model, 
-                                          metrics_fn=metrics_fn, 
                                           test_dataloader=test_dataloader, 
-                                          saved_test_results_dir_path=saved_test_results_dir_path)
+                                          saved_test_results_dir_path=saved_test_results_dir_path,
+                                          maskeddata_mean=maskeddata_mean,
+                                          maskeddata_std=maskeddata_std,
+                                          embeddings_mean=embeddings_mean,
+                                          embeddings_std=embeddings_std
+                                    )
+        print(f'Averaged Euclidean distance = {Euclidean_distance:.4f}.')
         print(f'GPU memory usage: {mem_reserved:.2f} GB / {total_memory:.2f} GB.')
-    # Analyze
-    elif task == 'analyze':
-        analyze_test_results(saved_test_results_dir_path=saved_test_results_dir_path)
     # Generate
-    elif task == 'generate':
-        pass
+    elif task == 'generate' or task == 'generation':
+        blip_diffusion_model, _, _ = load_blip_models(mode = 'diffusion')
+        for index, files_path in test_trial_path_dict.items():
+            print(f'Generating {index+1} / {len(test_trial_path_dict)}.')
+            image_path = files_path['image']
+            canny_path = files_path['canny']
+            strings_path = files_path['strings']
+            pred_multimodal_embedding_path = join_paths(saved_test_results_dir_path, str(index), 'pred_multimodal_embedding.npy')
+            multimodal_embedding = np.load(pred_multimodal_embedding_path, allow_pickle=True)
+            assert multimodal_embedding.shape == uncond_embedding.shape
+            embedding = np.stack((uncond_embedding, multimodal_embedding), axis=0)
+            embedding = torch.from_numpy(embedding).to(device)
+            generated_image = blip_diffusion_model.generate_image_via_embedding(
+                text_embeddings=embedding,
+                seed=iter_seed,
+                guidance_scale=guidance_scale,
+                height=512,
+                width=512,
+                num_inference_steps=num_inference_steps,
+            )
+            generated_image[0].save(join_paths(saved_test_results_dir_path, str(index), 'output.png'))
     else:
         raise ValueError(f'Task should be either train or test, but got {task}.')
     
@@ -204,13 +245,8 @@ if __name__ == '__main__':
     main()
     # from utils import join_paths
     # from PIL import Image
-    # from models import load_blip_models
-    # blip_diffusion_model, vis_preprocess, txt_preprocess = load_blip_models(mode = 'diffusion')
     # cond_image = Image.open(join_paths('..','BraVO_saved','subj01_pairs','test','session01_run01_trial01','image.png')).convert("RGB")
     # cond_images = vis_preprocess["eval"](cond_image).unsqueeze(0).to(device)
-    # iter_seed = 88888
-    # guidance_scale = 7.5
-    # num_inference_steps = 500 # TODO 可以调整哒
     # negative_prompt = "over-exposure, under-exposure, saturated, duplicate, out of frame, lowres, cropped, worst quality, low quality, jpeg artifacts, morbid, mutilated, out of frame, ugly, bad anatomy, bad proportions, deformed, blurry, duplicate"
     # cond_subjects = [txt_preprocess["eval"]('person')]
     # tgt_subjects = [txt_preprocess["eval"]('person')]
@@ -235,14 +271,3 @@ if __name__ == '__main__':
     #         guidance_scale=guidance_scale,
     #         neg_prompt=negative_prompt,
     #     )
-    #     output = blip_diffusion_model.generate_image_via_embedding(
-    #         text_embeddings=output,
-    #         seed=iter_seed,
-    #         guidance_scale=guidance_scale,
-    #         height=512,
-    #         width=512,
-    #         num_inference_steps=num_inference_steps,
-    #     )
-    #     output[0].save(f"output_{idx}.png")
-    # exit(0)
-    # # TODO DiT facebook DiT  https://github.com/facebookresearch/DiT    有没有two guided的DiT 或者学习人家blip-diffusion把图像+文本来生成一个text embedding

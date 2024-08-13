@@ -431,4 +431,4 @@ class NSD_DATA():
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
 
 # make pairs of NSD
-NSD_DATA(subj_id=1)  # 1 2 5 7      
+NSD_DATA(subj_id=2)  # 1 2 5 7      

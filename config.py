@@ -18,7 +18,9 @@ configs_dict = {
 
     'blip_diffusion' :{
         'negative_prompt' : 'over-exposure, under-exposure, saturated, duplicate, out of frame, lowres, cropped, worst quality, low quality, jpeg artifacts, morbid, mutilated, out of frame, ugly, bad anatomy, bad proportions, deformed, blurry, duplicate',
+        'iter_seed' : 8888,
         'guidance_scale' : 7.5,
+        'num_inference_steps' : 500, 
     },
 
 }

@@ -108,12 +108,17 @@ def analyze_embeddingPriori_and_maskedBrain(dataloader : torch.utils.data.DataLo
         a_initial = np.max(counts)
         b_initial = unique_values[np.argmax(counts)]
         c_initial = np.std(unique_values)
-        popt, pcov = curve_fit(__gaussian__, unique_values, counts, p0=[a_initial, b_initial, c_initial])  
+        popt, pcov = curve_fit(__gaussian__, unique_values, counts, 
+                               p0=[a_initial, b_initial, c_initial], 
+                               bounds=([0, -np.inf, 1e-8], [np.inf, np.inf, np.inf]),
+                               maxfev=10000)  
         results[tag]['popt'] = {
             'amplitude': popt[0],
             'mean': popt[1], 
-            'standard_deviation': popt[2]
+            'std': popt[2]
         }
+        # three-sigma rule of thumb
+        print(f'{tag}: {(np.sum(data < popt[1] - 3 * popt[2]) + np.sum(data > popt[1] + 3 * popt[2]))/len(data) * 100:.2f}% of data is outside the 3-sigma range')
         plt.figure(figsize=(10, 6))  
         plt.plot(unique_values, counts, marker='o')  
         plt.plot(unique_values, __gaussian__(unique_values, *popt), 'r--')  
@@ -128,31 +133,3 @@ def analyze_embeddingPriori_and_maskedBrain(dataloader : torch.utils.data.DataLo
         print(f'It took {end_time - start_time} seconds to plot and fit: {svg_path}')
    
     return results
-
-def analyze_test_results(saved_test_results_dir_path : str) -> None:
-    # if not os.path.exists(saved_test_results_dir_path) or len(os.listdir(saved_test_results_dir_path)) == 0:
-    #     print(f'No test results found in {saved_test_results_dir_path}')
-    #     return None 
-    
-    # start_time = time.time()
-    # data_flattend = np.array([])
-    # for file in tqdm(os.listdir(saved_test_results_dir_path), desc='Analyzing Test Results', leave=True):
-    #     file_path = os.path.join(saved_test_results_dir_path, file)
-    #     if 'pred' in file:
-    #         data = np.load(file_path, allow_pickle=True)
-    #         data_flattend = np.concatenate((data_flattend, data.flatten()))
-
-    # print('Plotting Test Results')
-    # svg_path = join_paths(save_figs_path, f'test_results.svg')
-    # data_flattend = data_flattend.astype(int).astype(int)
-    # unique_values, counts = np.unique(data_flattend, return_counts=True) 
-    # plt.figure(figsize=(10, 6))  
-    # plt.plot(unique_values, counts, marker='o')  
-    # plt.title('Value Frequency Distribution')  
-    # plt.xlabel('Value')  
-    # plt.ylabel('Frequency')  
-    # plt.grid(True)  
-    # plt.savefig(svg_path, format='svg') 
-    # end_time = time.time()
-    # print(f'It took {end_time - start_time} seconds to plot and fit: {svg_path}')
-    pass
