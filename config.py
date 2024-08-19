@@ -6,14 +6,14 @@ configs_dict = {
 
     'NSD_ROIs' : {
         'derived_type' : 'surface',
-        'roi_name' : 'prf-visualrois',
+        'roi_name' : 'corticalsulc',
         'thresholds' : [],
     },
 
     'train_decoder' : {
-        'batch_size' : 32, 
+        'batch_size' : 1,#64, 
         'learning_rate' : 1e-4,
-        'epochs' : 10,
+        'epochs' : 500,
     },
 
     'blip_diffusion' :{

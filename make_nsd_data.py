@@ -1,5 +1,4 @@
 import os
-import cv2
 import h5py
 import time
 import shutil
@@ -9,6 +8,7 @@ import pandas as pd
 from tqdm import tqdm
 from PIL import Image
 import torch.nn.functional as F
+from lavis.models.blip_diffusion_models.utils import preprocess_canny
 
 from config import configs_dict
 from models import device, load_blip_models
@@ -342,6 +342,12 @@ class NSD_DATA():
                         else:
                             saved_path = join_paths(test_saved_dir_path, session_run_trial_string)
                         check_and_make_dirs(saved_path)
+                        
+                        if len(os.listdir(saved_path)) == 5: # canny, fmri, image, multimodal_embedding, strings
+                            continue
+                        elif len(os.listdir(saved_path)) > 5:
+                            print(f'Check files in {saved_path}')
+                            exit(1)
 
                         # fMRI
                         save_nii_file(fmri, join_paths(saved_path, 'fmri.nii.gz'))
@@ -350,9 +356,19 @@ class NSD_DATA():
                         image = Image.fromarray(imgBrick[KID_73])
                         image.save(join_paths(saved_path, 'image.png'))
                         # canny
-                        gray_image = cv2.cvtColor(imgBrick[KID_73], cv2.COLOR_RGB2GRAY)
-                        edges = cv2.Canny(gray_image, 100, 200)
-                        cv2.imwrite(join_paths(saved_path, 'canny.png'), edges)
+                        canny_image = preprocess_canny(input_image=imgBrick[KID_73].astype(np.uint8), 
+                                                       image_resolution=imgBrick[KID_73].shape[0], 
+                                                       low_threshold=100, high_threshold=200
+                                                    )
+                        canny = np.array(canny_image)
+                        if not np.max(canny) > np.min(canny):
+                            canny_image = preprocess_canny(input_image=imgBrick[KID_73].astype(np.uint8), 
+                                                           image_resolution=imgBrick[KID_73].shape[0], 
+                                                           low_threshold=np.min(canny)//2, high_threshold=np.max(canny)//2
+                                                        )
+                        canny = np.array(canny_image)
+                        assert np.max(canny) > np.min(canny), f'Canny image is all black in path={saved_path}!'
+                        canny_image.save(join_paths(saved_path, 'canny.png'))
 
                         # old_flag, captions and categories
                         OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
@@ -431,4 +447,4 @@ class NSD_DATA():
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
 
 # make pairs of NSD
-NSD_DATA(subj_id=2)  # 1 2 5 7      
+NSD_DATA(subj_id=1)  # 1 2 5 7      
