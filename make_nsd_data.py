@@ -16,8 +16,8 @@ from utils import NSD_dir_path, NSD_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs
 
 # Load blip2 model
-BLIP_Diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
-BLIP2_Matching_model, bm_vis_processors, bm_txt_processors = load_blip_models(mode = 'matching')
+blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
+blip2_matching_model, bm_vis_processors, bm_txt_processors = load_blip_models(mode = 'matching')
 
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
@@ -381,7 +381,7 @@ class NSD_DATA():
                         sample['image'] = bm_vis_processors['eval'](image).unsqueeze(0).to(device)
                         for caption in captions_list:
                             sample['text_input'] = bm_txt_processors['eval'](caption)
-                            itm_output = BLIP2_Matching_model(sample, match_head='itm')
+                            itm_output = blip2_matching_model(sample, match_head='itm')
                             itm_scores = F.softmax(itm_output, dim=1)
                             itm_scores = itm_scores[:, 1].item()
                             if itm_scores > itm_max:
@@ -410,7 +410,7 @@ class NSD_DATA():
                         # Extract the embedding and save it as a npy file
                         # embedding = [uncond_embeddings, multimodal_embeddings], every uncond_embedding is the same, text_embeddings come from the result of BLIP-2 feature_extractor's multimodal.
                         # embedding.shape = [2,77,768]
-                        embedding = BLIP_Diffusion_model.generate_embedding(
+                        embedding = blip_diffusion_model.generate_embedding(
                                 samples=sample,
                                 neg_prompt=configs_dict['blip_diffusion']['negative_prompt'],
                                 guidance_scale=configs_dict['blip_diffusion']['guidance_scale'],

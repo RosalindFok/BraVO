@@ -33,6 +33,7 @@ def _setup_device_() -> list[torch.device]:
 
 devices = _setup_device_()
 device = devices[0]
+devices_num = len(devices)
 
 def get_GPU_memory_usage() -> tuple[float, float]:
     if torch.cuda.is_available():  
@@ -81,106 +82,131 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
 ########################
 ######Brain Decoder#####
 ######################## 
-
-# class Bijection_ND_CDF(nn.Module):
-#     """
-#     N(miu, sigma) <--> CDF[0, 1] 
-#     """    
-#     def __init__(self, forward_mean  : float = 0.0, forward_std  : float = 1.0, 
-#                        backward_mean : float = 0.0, backward_std : float = 1.0) -> None:
-#         super().__init__()
-#         self.forward_mean = forward_mean
-#         self.forward_std = forward_std
-#         self.backward_mean = backward_mean
-#         self.backward_std = backward_std
-
-#     # Map the normal distribution to a Cumulative Distribution Function between [0,1]
-#     def forward(self, x : torch.Tensor) -> torch.Tensor:
-#         # Standardize the tensor    
-#         x = (x - self.forward_mean) / self.forward_std
-#         # Compute the CDF of the standard normal distribution
-#         x = 0.5 * (1 + torch.erf(x / torch.sqrt(torch.tensor(2.0, device=x.device))))
-#         return x
-
-#     # Map the Cumulative Distribution Function between [0,1] to a normal distribution ~ N(miu, sigma)
-#     def backward(self, x : torch.Tensor) -> torch.Tensor:
-#         # Inverse CDF (Probit function)  
-#         x = torch.distributions.Normal(0, 1).icdf(x)  
-#         # Transform to new normal distribution with priori_mean and priori_std  
-#         x = self.backward_mean + self.backward_std * x  
-#         return x 
+class Conv_Twice(nn.Module):
+    def __init__(self, in_channels : int, out_channels : int) -> None:
+        super().__init__()
+        self.convs = nn.Sequential(
+            nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv1d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        x = self.convs(x)
+        return x
     
+class Down(nn.Module):
+    def __init__(self, in_channels : int, out_channels : int) -> None:
+        super().__init__()
+        self.down_sample = nn.Sequential(
+            nn.MaxPool1d(2),
+            Conv_Twice(in_channels=in_channels, out_channels=out_channels)
+        )
+
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        x = self.down_sample(x)  
+        return x
+
+class Up(nn.Module):
+    def __init__(self, in_channels : int, out_channels : int) -> None:
+        super().__init__()
+        self.up_sample = nn.ConvTranspose1d(in_channels=in_channels, out_channels=in_channels//2, kernel_size=2, stride=2)
+        self.convs =  Conv_Twice(in_channels=in_channels, out_channels=out_channels)
+        
+    def forward(self, x1 : torch.Tensor, x2 : torch.Tensor) -> torch.Tensor:
+        x1 = self.up_sample(x1)
+        assert x1.shape == x2.shape, f'x1.shape={x1.shape} != x2.shape={x2.shape}.'
+        x = torch.cat((x1, x2), dim=1)  
+        x = self.convs(x)
+        return x
+
 class BraVO_Decoder(nn.Module):
     """
     """
     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
         super().__init__()
-        self.input_shape = input_shape[0]
-        self.output_shape = output_shape[0]*output_shape[1]
-        self.latend_dim = 4096 # 2**12
+        assert input_shape == output_shape, f'input_shape={input_shape} != output_shape={output_shape}.'
+        self.input_layer = nn.Conv1d(in_channels=input_shape[0], out_channels=128, kernel_size=3, padding=1)
+        self.dw1 = Down(in_channels=128, out_channels=256)
+        self.dw2 = Down(in_channels=256, out_channels=512)
+        self.dw3 = Down(in_channels=512, out_channels=1024)
+        self.dw4 = Down(in_channels=1024, out_channels=2048)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=2048, nhead=512, dim_feedforward=2048*4, batch_first=True)
+        self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=32)  
+        self.up1 = Up(in_channels=2048, out_channels=1024)
+        self.up2 = Up(in_channels=1024, out_channels=512)
+        self.up3 = Up(in_channels=512, out_channels=256)
+        self.up4 = Up(in_channels=256, out_channels=128)
+        self.output_layer = nn.Conv1d(in_channels=128, out_channels=output_shape[0], kernel_size=1, padding=0)
 
-        self.encoder = nn.Sequential(
-            nn.Linear(self.input_shape, self.latend_dim),
-            nn.Tanh(),
-        )
-
-        self.mean_layer = nn.Linear(self.latend_dim, self.latend_dim//4)
-        self.log_var_layer = nn.Linear(self.latend_dim, self.latend_dim//4)
-
-        self.decoder = nn.Sequential(
-            nn.Linear(self.latend_dim//4, self.latend_dim),
-            nn.Tanh(),
-            nn.Linear(self.latend_dim, self.output_shape),
-            nn.Tanh(),
-        )
-        
-
-    def reparameterization(self, mean : torch.Tensor, log_var : torch.Tensor) -> torch.Tensor:
-        epsilon = torch.randn_like(log_var).to(mean.device)
-        return torch.exp(0.5 * log_var) * epsilon + mean
-    
+    def priori(self, x : torch.Tensor) -> torch.Tensor:
+        x[:, 0, 19] = -28.203892
+        x[:, 0, 681] = 32.661076
+        return x
     def forward(self, x: torch.Tensor) -> torch.Tensor:  
-        x = self.encoder(x)
-        mean = self.mean_layer(x)
-        log_var = self.log_var_layer(x)
-        x = self.reparameterization(mean, log_var)
-        x = self.decoder(x)
-        return x, mean, log_var  
+        # Encoder
+        x1 = self.input_layer(x)
+        x2 = self.dw1(x1)
+        x3 = self.dw2(x2)
+        x4 = self.dw3(x3)
+        x5 = self.dw4(x4)
 
+        # Bottleneck
+        x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
+        x5 = self.bottleneck(x5)
+        x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
+
+        # Decoder
+        y4 = self.up1(x5, x4)
+        y3 = self.up2(y4, x3)
+        y2 = self.up3(y3, x2)
+        y1 = self.up4(y2, x1)
+        y = self.output_layer(y1)
+
+        # Priori of BLIP Diffusion's embedding
+        y = self.priori(y)
+
+        return y
+    
 # class BraVO_Decoder(nn.Module):
+#     """
+#     """
 #     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
 #         super().__init__()
 #         self.input_shape = input_shape[0]
-#         self.output_dim= output_shape[0]
-#         self.output_channel = output_shape[-1]
-#         self.start_feature_map_size = 256#int(self.input_shape**0.5)
+#         self.output_shape = output_shape[0]*output_shape[1]
+#         self.latend_dim = 4096 # 2**12
 
-#         self.activate = nn.LeakyReLU(negative_slope=0.1)
-#         self.linear = nn.Linear(self.input_shape, self.start_feature_map_size**2)
-#         # output_dim=(input_dim−1)×stride−2×padding+dilation×(kernel_size−1)+output_padding+1
-#         self.convt = nn.ConvTranspose2d(in_channels=1, out_channels=self.output_channel, 
-#                                         kernel_size=4, stride=2, 
-#                                         padding=1, #output_padding=1
-#                                     )
-#         self.upsample = nn.Upsample(size=(self.output_dim, self.output_dim), mode='bicubic', align_corners=False)
-#         mid_channel_in_convs = 9
-#         self.convs = nn.Sequential(
-#             nn.Conv2d(in_channels=self.output_channel, out_channels=mid_channel_in_convs, kernel_size=3, stride=1, padding=1),
-#             # nn.BatchNorm2d(num_features=mid_channel_in_convs),
-#             self.activate,
-#             nn.Conv2d(in_channels=mid_channel_in_convs, out_channels=self.output_channel, kernel_size=3, stride=1, padding=1),
+#         self.encoder = nn.Sequential(
+#             # nn.Linear(self.input_shape, self.latend_dim),
+#             nn.Linear(self.input_shape, self.latend_dim*3),
+#             nn.Tanh(),
 #         )
 
-#     def forward(self, x : torch.Tensor) -> torch.Tensor:
-#         x = self.linear(x)
-#         x = self.activate(x)
-#         x = x.view(x.size(0), 1, self.start_feature_map_size, self.start_feature_map_size)
-#         x = self.convt(x)
-#         x = self.activate(x)
-#         x = self.upsample(x)
-#         x = self.activate(x)
-#         x = self.convs(x)
-#         x = x.permute(0, 2, 3, 1)  
-#         x = (x-torch.min(x))/(torch.max(x)-torch.min(x)) * 255
-#         return x      
+#         # self.mean_layer = nn.Linear(self.latend_dim, self.latend_dim//4)
+#         self.mean_layer = nn.Linear(self.latend_dim*3, self.latend_dim)
+#         # self.log_var_layer = nn.Linear(self.latend_dim, self.latend_dim//4)
+#         self.log_var_layer = nn.Linear(self.latend_dim*3, self.latend_dim)
 
+#         self.decoder = nn.Sequential(
+#             # nn.Linear(self.latend_dim//4, self.latend_dim),
+#             nn.Linear(self.latend_dim, self.latend_dim*3),
+#             nn.Tanh(),
+#             # nn.Linear(self.latend_dim, self.output_shape),
+#             nn.Linear(self.latend_dim*3, self.output_shape),
+#         )
+        
+
+#     def reparameterization(self, mean : torch.Tensor, log_var : torch.Tensor) -> torch.Tensor:
+#         epsilon = torch.randn_like(log_var).to(mean.device)
+#         return torch.exp(0.5 * log_var) * epsilon + mean
+    
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:  
+#         x = self.encoder(x)
+#         mean = self.mean_layer(x)
+#         log_var = self.log_var_layer(x)
+#         x = self.reparameterization(mean, log_var)
+#         x = self.decoder(x)
+#         return x, mean, log_var  

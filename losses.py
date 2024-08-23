@@ -9,17 +9,16 @@ class Decoder_loss(nn.modules.loss._Loss):
         self.w1 = w1
         self.w2 = w2
 
-    def forward(self, input, target, mean, log_var) -> torch.Tensor:
+    def forward(self, input, target) -> torch.Tensor:
+        input = input.view(input.shape[0], -1)
+        target = target.view(target.shape[0], -1)
         # Check input and target tensors
         assert not torch.isnan(input).any() and not torch.isinf(input).any(), f'Input tensor contains nan or inf values'
         assert not torch.isnan(target).any() and not torch.isinf(target).any(), f'Target tensor contains nan or inf values'
         # MSE Loss
         mseloss = nn.MSELoss()(input, target)
         assert not torch.isnan(mseloss), f'MSE loss is nan: {mseloss}'
-        # # COS Loss
-        # cosloss = nn.CosineEmbeddingLoss(reduction='mean')(input, target, torch.ones([input.shape[0]], device=input.device))
-        # assert not torch.isnan(cosloss), f'Cosine loss is nan: {cosloss}'
-        # KLD
-        kld = - 0.5 * torch.sum(1+ log_var - mean.pow(2) - log_var.exp())
-        assert not torch.isnan(kld), f'KLD loss is nan: {kld}'
-        return self.w1 * mseloss + self.w2 * kld
+        # COS Loss
+        cosloss = nn.CosineEmbeddingLoss()(input, target, torch.ones([input.shape[0]], device=input.device))
+        assert not torch.isnan(cosloss), f'Cosine loss is nan: {cosloss}'
+        return self.w1 * mseloss + self.w2 * cosloss

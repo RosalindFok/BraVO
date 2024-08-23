@@ -1,10 +1,14 @@
+*.sh text eol=lf  
+
 *.py text eol=lf  
 
-* text=auto  
+*.md text eol=lf  
 
 *.jpg binary  
 *.png binary  
 *.gif binary  
 *.exe binary  
 *.dll binary  
-*.so binary
+*.so binary  
+
+* text=auto

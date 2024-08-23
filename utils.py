@@ -97,6 +97,18 @@ def merge_dicts_if_no_conflict(dict1 : dict[any, any], dict2 : dict[any, any]) -
     assert len(merged_dict) == len(dict1) + len(dict2), print(f'Error: Merged dictionary has different length than the sum of the original dictionaries.')
     return merged_dict
 
+def get_file_size(file_path : str) -> str:
+    """
+    """
+    size_bytes = os.path.getsize(file_path)  
+    units = ['B', 'KB', 'MB', 'GB', 'TB']  
+    size = size_bytes  
+    unit_index = 0  
+    while size >= 1024 and unit_index < len(units) - 1:  
+        size /= 1024.0  
+        unit_index += 1
+    return f'{size} {units[unit_index]}.'
+
 ''' paths '''
 NSD_dir_path = join_paths('..', 'dataset', 'NSD')
 fMRI_Shape_dir_path = join_paths('..', 'dataset', 'fMRI_Shape')

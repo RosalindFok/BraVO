@@ -89,12 +89,17 @@ Download tar.gz from `https://storage.googleapis.com/sfr-vision-language-researc
 5. [LAVIS of Salesforce](https://github.com/salesforce/LAVIS)
 The code has been changed for this project.
 
-**Step 1:**
-run `sbatch --gpus=2 -p gpu step1_run.sh`  for subj 01, 02, 05, 07
+run ``  for subj 01, 02, 05, 07
 
 **Step 2:**
-Change `train` or `test` in `step2_run.sh`  <br>
-run `sbatch --gpus=2 -p gpu step2_run.sh`
+``` shell
+# Preprocess data
+sbatch --gpus=2 -p gpu step1_run.sh
+# Train
+sbatch --gpus=6 -p gpu step2_run.sh  
+# Test and Generate
+sbatch --gpus=1 -p gpu step3_run.sh
+```
 
 ## Delete the Enviorment:
 ``` shell
