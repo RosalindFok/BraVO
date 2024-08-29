@@ -138,11 +138,11 @@ def main() -> None:
     saved_subj_train_result_dir_path = join_paths(train_results_dir_path, dataset_name, f'subj{str(subj_id).zfill(2)}', f'{derived_type}_{roi_name}', f'{labels_string}')
     check_and_make_dirs(saved_subj_train_result_dir_path)
     # the path of saving the trained model
-    saved_model_path = join_paths(saved_subj_train_result_dir_path, f'ep-{epochs}_bs-{batch_size}_lr-{learning_rate}.pth')
+    saved_model_path = join_paths(saved_subj_train_result_dir_path, f'ep-{epochs}_lr-{learning_rate}.pth')
     # path to save the prediected fMRI(whole brain)
     saved_test_results_dir_path = join_paths(test_results_dir_path, dataset_name, f'subj{str(subj_id).zfill(2)}', f'{derived_type}_{roi_name}', f'{labels_string}')
     if os.path.exists(saved_test_results_dir_path):
-        shutil.rmtree(saved_subj_train_result_dir_path)
+        shutil.rmtree(saved_test_results_dir_path)
     check_and_make_dirs(saved_test_results_dir_path)
     
     
@@ -162,7 +162,7 @@ def main() -> None:
     bravo_decoder_model = torch.nn.DataParallel(bravo_decoder_model)
     print(f'The number of trainable parametes is {trainable_parameters}.')
     # Loss function
-    decoder_loss = Decoder_loss(w1=1, w2=0.5)
+    decoder_loss = Decoder_loss(w1=1, w2=0.5) 
     # Optimizer
     # optimizer_of_brain_decoder = torch.optim.Adam(bravo_decoder_model.parameters(), lr=learning_rate) 
     optimizer_of_brain_decoder = torch.optim.AdamW(bravo_decoder_model.parameters(), lr=learning_rate) 
@@ -229,4 +229,27 @@ def main() -> None:
         raise ValueError(f'Task should be either [train test generate generation], but got {task}.')
     
 if __name__ == '__main__':
+    blip_diffusion_model, _, _ = load_blip_models(mode = 'diffusion')
+    iter_seed = configs_dict['blip_diffusion']['iter_seed']
+    guidance_scale = configs_dict['blip_diffusion']['guidance_scale']
+    num_inference_steps = configs_dict['blip_diffusion']['num_inference_steps']
+    dir_path = join_paths('../BraVO_saved/NSD_preprocessed_pairs/subj01_pairs')
+    uncond_embedding = np.load(join_paths(dir_path, 'uncond_embedding.npy'), allow_pickle=True)
+    dir_path = join_paths(dir_path, 'test', 'session01_run01_trial01')
+    hidden_states = np.load(join_paths(dir_path, 'hidden_states.npy'), allow_pickle=True)
+    causal_attention_mask = np.load(join_paths(dir_path, 'causal_attention_mask.npy'), allow_pickle=True)
+    uncond_embedding = torch.from_numpy(uncond_embedding).to(device)
+    hidden_states = torch.from_numpy(hidden_states).to(device)
+    causal_attention_mask = torch.from_numpy(causal_attention_mask).to(device)
+    generated_image = blip_diffusion_model.generate_image_via_embedding(uncond_embedding=uncond_embedding,
+                                                      hidden_states=hidden_states,
+                                                      causal_attention_mask=causal_attention_mask,
+                                                      seed=iter_seed,
+                                                      guidance_scale=guidance_scale,
+                                                      height=512,
+                                                      width=512,
+                                                      num_inference_steps=50,
+                                                  )
+    generated_image.save('output.png')
+    exit()
     main()

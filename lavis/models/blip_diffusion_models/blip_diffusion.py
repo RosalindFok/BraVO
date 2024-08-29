@@ -6,7 +6,7 @@
 """
 import logging
 import os
-
+import PIL
 import torch
 import torch.nn.functional as F
 import tqdm
@@ -26,7 +26,7 @@ from lavis.common.registry import registry
 from lavis.common.utils import download_and_untar, is_url
 from lavis.models.base_model import BaseModel
 from lavis.models.blip2_models.blip2_qformer import Blip2Qformer
-from lavis.models.blip_diffusion_models.modeling_ctx_clip import CtxCLIPTextModel
+from lavis.models.blip_diffusion_models.modeling_ctx_clip import CtxCLIPTextModel, CtxCLIPTextModel_stage_1, CtxCLIPTextModel_stage_2
 from lavis.models.blip_diffusion_models.utils import numpy_to_pil, prepare_cond_image
 from lavis.models.blip_diffusion_models.ptp_utils import (
     LocalBlend,
@@ -117,6 +117,14 @@ class BlipDiffusion(BaseModel):
         self.text_encoder = CtxCLIPTextModel.from_pretrained(
             sd_pretrained_model_name_or_path, subfolder="text_encoder"
         )
+        ### BraVO
+        self.text_encoder_stage_1 = CtxCLIPTextModel_stage_1.from_pretrained(
+            sd_pretrained_model_name_or_path, subfolder="text_encoder"
+        )
+        self.text_encoder_stage_2 = CtxCLIPTextModel_stage_2.from_pretrained(
+            sd_pretrained_model_name_or_path, subfolder="text_encoder"
+        )
+        ### BraVO
         self.vae = AutoencoderKL.from_pretrained(
             sd_pretrained_model_name_or_path, subfolder="vae"
         )
@@ -154,6 +162,8 @@ class BlipDiffusion(BaseModel):
         to_freeze = [self.vae]
         if not self.sd_train_text_encoder:
             to_freeze.append(self.text_encoder)
+            to_freeze.append(self.text_encoder_stage_1)
+            to_freeze.append(self.text_encoder_stage_2)
 
         if not self.qformer_train:
             to_freeze.append(self.blip)
@@ -337,17 +347,16 @@ class BlipDiffusion(BaseModel):
 
     def _forward_prompt_embeddings(self, input_image, src_subject, prompt):
         # 1. extract BLIP query features and proj to text space -> (bs, 32, 768)
-        # In BraVO, it is (bs, 16, 768)
-        query_embeds = self.forward_ctx_embeddings(input_image, src_subject)
+        query_embeds = self.forward_ctx_embeddings(input_image, src_subject) 
 
         # 2. embeddings for prompt, with query_embeds as context
-        tokenized_prompt = self._tokenize_text(prompt).to(self.device)
+        tokenized_prompt = self._tokenize_text(prompt).to(self.device) 
         text_embeddings = self.text_encoder(
-            input_ids=tokenized_prompt.input_ids,
             ctx_embeddings=query_embeds,
             ctx_begin_pos=[self._CTX_BEGIN_POS],
-        )[0] # Shape = (bs, 77, 768)
-       
+            input_ids=tokenized_prompt.input_ids,
+        )[0] 
+
         return text_embeddings
 
     @torch.no_grad()
@@ -560,18 +569,30 @@ class BlipDiffusion(BaseModel):
 
     ### BraVO
     @torch.no_grad()
+    def generate_uncond_embedding(
+        self,
+        neg_prompt : str = '',
+    ) -> torch.Tensor:
+        max_length = self.text_encoder.text_model.config.max_position_embeddings
+        uncond_input = self.tokenizer(
+            [neg_prompt],
+            padding="max_length",
+            max_length=max_length,
+            return_tensors="pt",
+        )
+        uncond_embeddings = self.text_encoder(
+            input_ids=uncond_input.input_ids.to(self.device),
+            ctx_embeddings=None,
+        )[0]
+        return uncond_embeddings
+    
+    @torch.no_grad()
     def generate_embedding(
         self,
         samples,
-        guidance_scale=7.5,
-        neg_prompt="",
-        controller=None,
         prompt_strength=1.0,
-        prompt_reps=20,
-    ) -> torch.Tensor:
-        if controller is not None:
-            self._register_attention_refine(controller)
-
+        prompt_reps=20
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         cond_image = samples["cond_images"]  # reference image
         cond_subject = samples["cond_subject"]  # source subject category
         tgt_subject = samples["tgt_subject"]  # target subject category
@@ -584,37 +605,26 @@ class BlipDiffusion(BaseModel):
             prompt_reps=prompt_reps,
         )
 
-        text_embeddings = self._forward_prompt_embeddings(
-            cond_image, cond_subject, prompt
+        # image+cond_category -> image_embeddings
+        image_embeddings = self.forward_ctx_embeddings(cond_image, cond_subject) # tensor, (bs, 16, 768)
+        # prompt+tgt_category -> text_ids, which is list[int]
+        tokenized_prompt = self._tokenize_text(prompt).to(self.device) # transformers.tokenization_utils_base.BatchEncoding, including 'input_ids' and 'attention_mask'
+        text_ids = tokenized_prompt.input_ids
+
+        hidden_states, causal_attention_mask = self.text_encoder_stage_1(
+            ctx_embeddings=image_embeddings,
+            ctx_begin_pos=[self._CTX_BEGIN_POS],
+            input_ids=text_ids
         )
 
-        # 3. unconditional embedding
-        do_classifier_free_guidance = guidance_scale > 1.0
-        if do_classifier_free_guidance:
-            max_length = self.text_encoder.text_model.config.max_position_embeddings
-
-            uncond_input = self.tokenizer(
-                [neg_prompt],
-                padding="max_length",
-                max_length=max_length,
-                return_tensors="pt",
-            )
-            uncond_embeddings = self.text_encoder(
-                input_ids=uncond_input.input_ids.to(self.device),
-                ctx_embeddings=None,
-            )[0]
-
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            multimodal_embeddings = torch.cat([uncond_embeddings, text_embeddings])
-
-        return multimodal_embeddings
+        return hidden_states, causal_attention_mask
 
     @torch.no_grad()
     def generate_image_via_embedding(
         self,
-        text_embeddings,
+        uncond_embedding,
+        hidden_states,
+        causal_attention_mask,
         latents=None,
         guidance_scale=7.5,
         height=512,
@@ -622,11 +632,10 @@ class BlipDiffusion(BaseModel):
         seed=42,
         num_inference_steps=50,
         use_ddim=False,
-    ):
-        cldm_cond_image = None#samples.get("cldm_cond_image", None)  # conditional image
-        if seed is not None:
-            generator = torch.Generator(device=self.device)
-            generator = generator.manual_seed(seed)
+    ) -> PIL.Image.Image:  
+        # seed
+        generator = torch.Generator(device=self.device)
+        generator = generator.manual_seed(seed)
 
         latents = self._init_latent(latents, height, width, generator, batch_size=1)
 
@@ -638,20 +647,27 @@ class BlipDiffusion(BaseModel):
 
         iterator = tqdm.tqdm(scheduler.timesteps)
 
+        text_embeddings = self.text_encoder_stage_2(
+            hidden_states=hidden_states,
+            causal_attention_mask=causal_attention_mask
+        )
+
+        embeddings = torch.cat([uncond_embedding, text_embeddings])
+
         for i, t in enumerate(iterator):
             latents = self._denoise_latent_step(
                 latents=latents,
                 t=t,
-                text_embeddings=text_embeddings,
-                cond_image=cldm_cond_image,
+                text_embeddings=embeddings,
+                cond_image=None,
                 height=height,
                 width=width,
                 guidance_scale=guidance_scale,
                 use_inversion=use_ddim,
             )
 
-        image = self._latent_to_image(latents)
-
+        image = self._latent_to_image(latents)[0]
+        
         return image
     ### BraVO
 
@@ -981,7 +997,6 @@ class BlipDiffusion(BaseModel):
                 {"image": input_image, "text_input": text_input}, mode="multimodal"
             ).multimodal_embeds
             ctx_embeddings = self.proj_layer(blip_embeddings)
-
             return ctx_embeddings
 
         if isinstance(text_input, str):

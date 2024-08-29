@@ -11,9 +11,9 @@ configs_dict = {
     },
 
     'train_decoder' : {
-        'batch_size' : 32, # 32 <--> 1 cuda 
+        'batch_size' : 48, # 48 <--> 1 cuda   ye xu ke yi tiao da dian shi shi
         'learning_rate' : 1e-4,
-        'epochs' : 130,
+        'epochs' : 500,
     },
 
     'blip_diffusion' :{

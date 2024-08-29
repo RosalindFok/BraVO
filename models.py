@@ -88,10 +88,10 @@ class Conv_Twice(nn.Module):
         self.convs = nn.Sequential(
             nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1),
             nn.BatchNorm1d(out_channels),
-            nn.ReLU(inplace=True),
+            nn.Tanh(),
             nn.Conv1d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1),
             nn.BatchNorm1d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.Tanh()
         )
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         x = self.convs(x)

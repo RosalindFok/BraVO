@@ -7,17 +7,12 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from PIL import Image
-import torch.nn.functional as F
 from lavis.models.blip_diffusion_models.utils import preprocess_canny
 
 from config import configs_dict
 from models import device, load_blip_models
 from utils import NSD_dir_path, NSD_saved_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs
-
-# Load blip2 model
-blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
-blip2_matching_model, bm_vis_processors, bm_txt_processors = load_blip_models(mode = 'matching')
 
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
@@ -57,9 +52,6 @@ class NSD_DATA():
         ## saved path of this subject
         self.subject_saved_dir_path = join_paths(NSD_saved_dir_path, self.subj+'_pairs')
         check_and_make_dirs(self.subject_saved_dir_path)
-
-        # make fMRI-image-caption pairs
-        self.make_pairs()
 
     def read_behav_responses_tsv(self) -> pd.core.frame.DataFrame:
         start_time = time.time()
@@ -313,14 +305,22 @@ class NSD_DATA():
 
         ## ROIs
         self.read_ROIs()
+
+        ## Load blip2 model
+        blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode='diffusion')
+
+        ## save_uncond_embedding
+        uncond_embedding = blip_diffusion_model.generate_uncond_embedding(neg_prompt=configs_dict['blip_diffusion']['negative_prompt'])
+        uncond_embedding = uncond_embedding.cpu().numpy()
+        np.save(join_paths(self.subject_saved_dir_path, 'uncond_embedding.npy'), uncond_embedding)
+        assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} is not (1, 77, 768).'
         
+        ## Paths of train set and test set
         train_saved_dir_path = join_paths(self.subject_saved_dir_path, 'train')
         test_saved_dir_path = join_paths(self.subject_saved_dir_path, 'test')
         check_and_make_dirs(train_saved_dir_path)
         check_and_make_dirs(test_saved_dir_path)
 
-        check_uncond_embeddings = True
-        saved_uncond_embeddings = None
         for session_id in responses['SESSION'].unique():
             response = responses[responses['SESSION'] == session_id].to_numpy()
             space_type, nii_data = self.read_betas(session_id=session_id)
@@ -343,7 +343,7 @@ class NSD_DATA():
                             saved_path = join_paths(test_saved_dir_path, session_run_trial_string)
                         check_and_make_dirs(saved_path)
                         
-                        if len(os.listdir(saved_path)) == 5: # canny, fmri, image, multimodal_embedding, strings
+                        if len(os.listdir(saved_path)) == len(['canny', 'fmri', 'image', 'strings', 'hidden_states', 'causal_attention_mask']): 
                             continue
                         elif len(os.listdir(saved_path)) > 5:
                             print(f'Check files in {saved_path}')
@@ -375,23 +375,11 @@ class NSD_DATA():
                         captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
                         category_list = categories_dict[stim_info[KID_73]] # list[dict[str, any]], [{'supercategory', 'name', 'area}]
                         
-                        # Select the best caption via itm score
+                        # Add image and caption to sample
                         itm_max, selected_caption = -1, ''
                         sample = {}
-                        sample['image'] = bm_vis_processors['eval'](image).unsqueeze(0).to(device)
-                        for caption in captions_list:
-                            sample['text_input'] = bm_txt_processors['eval'](caption)
-                            itm_output = blip2_matching_model(sample, match_head='itm')
-                            itm_scores = F.softmax(itm_output, dim=1)
-                            itm_scores = itm_scores[:, 1].item()
-                            if itm_scores > itm_max:
-                                itm_max = itm_scores
-                                selected_caption = caption
-                        del sample['text_input']
-                        del sample['image']
-                        selected_caption_processed = [bd_txt_processors['eval'](selected_caption)]
-                        sample['prompt'] = selected_caption_processed
                         sample['cond_images'] = bd_vis_processors['eval'](image).unsqueeze(0).to(device)
+                        sample['prompt'] = captions_list
 
                         # Select the category with the biggest area
                         area_of_each_category = {}
@@ -408,22 +396,13 @@ class NSD_DATA():
                         sample['tgt_subject']  = max_key_processed
 
                         # Extract the embedding and save it as a npy file
-                        # embedding = [uncond_embeddings, multimodal_embeddings], every uncond_embedding is the same, text_embeddings come from the result of BLIP-2 feature_extractor's multimodal.
-                        # embedding.shape = [2,77,768]
-                        embedding = blip_diffusion_model.generate_embedding(
-                                samples=sample,
-                                neg_prompt=configs_dict['blip_diffusion']['negative_prompt'],
-                                guidance_scale=configs_dict['blip_diffusion']['guidance_scale'],
-                            )
-                        assert embedding.shape == (2, 77, 768), f'In {saved_path}, embedding shape is {embedding.shape}, not (2, 77, 768).'
-                        [uncond_embeddings, multimodal_embeddings] = embedding
-                        uncond_embeddings = uncond_embeddings.cpu().numpy()
-                        multimodal_embeddings = multimodal_embeddings.cpu().numpy()
-                        if check_uncond_embeddings:
-                            saved_uncond_embeddings = uncond_embeddings
-                            check_uncond_embeddings = False
-                        assert np.all(saved_uncond_embeddings == uncond_embeddings), f'Uncond embeddings are not the same for all sessions, {saved_uncond_embeddings} != {uncond_embeddings}.'
-                        np.save(join_paths(saved_path, 'multimodal_embedding.npy'), multimodal_embeddings)
+                        hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
+                        assert hidden_states.shape == (1, 77, 768), f'In {saved_path}, embedding shape is {hidden_states.shape}, not (1, 77, 768).'
+                        assert causal_attention_mask.shape == (1, 1, 77, 77), f'In {saved_path}, causal_attention_mask shape is {causal_attention_mask.shape}, not (1, 1, 77, 77).'
+                        hidden_states = hidden_states.cpu().numpy()
+                        causal_attention_mask = causal_attention_mask.cpu().numpy()
+                        np.save(join_paths(saved_path, 'hidden_states.npy'), hidden_states)
+                        np.save(join_paths(saved_path, 'causal_attention_mask.npy'), causal_attention_mask)
 
                         # Save the strings to json file
                         json_data = {
@@ -442,9 +421,9 @@ class NSD_DATA():
             else:
                 raise NotImplementedError(f'Space type: {space_type} is not supported.')
         
-        np.save(join_paths(self.subject_saved_dir_path, 'uncond_embedding.npy'), saved_uncond_embeddings)
-
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
 
 # make pairs of NSD
-NSD_DATA(subj_id=1)  # 1 2 5 7      
+if __name__ == '__main__':
+    nsd_data = NSD_DATA(subj_id=configs_dict['subj_id'])
+    nsd_data.make_pairs()
