@@ -122,91 +122,99 @@ class Up(nn.Module):
         x = self.convs(x)
         return x
 
-class BraVO_Decoder(nn.Module):
+class Caption_Decoder(nn.Module):
     """
     """
     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
         super().__init__()
         assert input_shape == output_shape, f'input_shape={input_shape} != output_shape={output_shape}.'
-        self.input_layer = nn.Conv1d(in_channels=input_shape[0], out_channels=128, kernel_size=3, padding=1)
-        self.dw1 = Down(in_channels=128, out_channels=256)
-        self.dw2 = Down(in_channels=256, out_channels=512)
-        self.dw3 = Down(in_channels=512, out_channels=1024)
-        self.dw4 = Down(in_channels=1024, out_channels=2048)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=2048, nhead=512, dim_feedforward=2048*4, batch_first=True)
-        self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=32)  
-        self.up1 = Up(in_channels=2048, out_channels=1024)
-        self.up2 = Up(in_channels=1024, out_channels=512)
-        self.up3 = Up(in_channels=512, out_channels=256)
-        self.up4 = Up(in_channels=256, out_channels=128)
-        self.output_layer = nn.Conv1d(in_channels=128, out_channels=output_shape[0], kernel_size=1, padding=0)
+        self.input_layer = nn.Conv1d(in_channels=input_shape[0], out_channels=64, kernel_size=3, padding=1)
+        self.input_bn = nn.BatchNorm1d(64) 
+        self.dw1 = Down(in_channels=64, out_channels=128)
+        self.dw2 = Down(in_channels=128, out_channels=256)
+        self.dw3 = Down(in_channels=256, out_channels=512)
+        self.dw4 = Down(in_channels=512, out_channels=1024)
+        # # encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=2048, batch_first=True)  
+        # encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=1024, batch_first=True)  
+        # self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=6)
+        self.bottleneck = nn.Conv1d(in_channels=1024, out_channels=1024, kernel_size=3, padding=1)
+        self.up1 = Up(in_channels=1024, out_channels=512)
+        self.up2 = Up(in_channels=512, out_channels=256)
+        self.up3 = Up(in_channels=256, out_channels=128)
+        self.up4 = Up(in_channels=128, out_channels=64)
+        self.output_layer = nn.Linear(64*input_shape[1], output_shape[0]*output_shape[1])
 
-    def priori(self, x : torch.Tensor) -> torch.Tensor:
-        x[:, 0, 19] = -28.203892
-        x[:, 0, 681] = 32.661076
-        return x
     def forward(self, x: torch.Tensor) -> torch.Tensor:  
         # Encoder
-        x1 = self.input_layer(x)
+        x1 = self.input_bn(self.input_layer(x))
         x2 = self.dw1(x1)
         x3 = self.dw2(x2)
         x4 = self.dw3(x3)
         x5 = self.dw4(x4)
 
         # Bottleneck
-        x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
+        # x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
         x5 = self.bottleneck(x5)
-        x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
+        # x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
 
         # Decoder
         y4 = self.up1(x5, x4)
         y3 = self.up2(y4, x3)
         y2 = self.up3(y3, x2)
         y1 = self.up4(y2, x1)
-        y = self.output_layer(y1)
 
-        # Priori of BLIP Diffusion's embedding
-        y = self.priori(y)
+        # Output
+        y1 = y1.view(y1.size(0), -1)
+        y = self.output_layer(y1)
+        y = y.view(y.size(0), x.size(1), x.size(2))
 
         return y
-    
-# class BraVO_Decoder(nn.Module):
-#     """
-#     """
-#     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
-#         super().__init__()
-#         self.input_shape = input_shape[0]
-#         self.output_shape = output_shape[0]*output_shape[1]
-#         self.latend_dim = 4096 # 2**12
 
-#         self.encoder = nn.Sequential(
-#             # nn.Linear(self.input_shape, self.latend_dim),
-#             nn.Linear(self.input_shape, self.latend_dim*3),
-#             nn.Tanh(),
-#         )
 
-#         # self.mean_layer = nn.Linear(self.latend_dim, self.latend_dim//4)
-#         self.mean_layer = nn.Linear(self.latend_dim*3, self.latend_dim)
-#         # self.log_var_layer = nn.Linear(self.latend_dim, self.latend_dim//4)
-#         self.log_var_layer = nn.Linear(self.latend_dim*3, self.latend_dim)
+class Image_Decoder(nn.Module):
+    """
+    """
+    def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
+        super().__init__()
+        assert input_shape == output_shape, f'input_shape={input_shape} != output_shape={output_shape}.'
+        self.input_layer = nn.Conv1d(in_channels=input_shape[0], out_channels=32, kernel_size=3, padding=1)
+        self.input_bn = nn.BatchNorm1d(32) 
+        self.dw1 = Down(in_channels=32, out_channels=64)
+        self.dw2 = Down(in_channels=64, out_channels=128)
+        self.dw3 = Down(in_channels=128, out_channels=256)
+        self.dw4 = Down(in_channels=256, out_channels=512)
+        # # encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=2048, batch_first=True)  
+        # encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=1024, batch_first=True)  
+        # self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=6)
+        self.bottleneck = nn.Conv1d(in_channels=512, out_channels=512, kernel_size=3, padding=1)
+        self.up1 = Up(in_channels=512, out_channels=256)
+        self.up2 = Up(in_channels=256, out_channels=128)
+        self.up3 = Up(in_channels=128, out_channels=64)
+        self.up4 = Up(in_channels=64, out_channels=32)
+        self.output_layer = nn.Linear(32*input_shape[1], output_shape[0]*output_shape[1])
 
-#         self.decoder = nn.Sequential(
-#             # nn.Linear(self.latend_dim//4, self.latend_dim),
-#             nn.Linear(self.latend_dim, self.latend_dim*3),
-#             nn.Tanh(),
-#             # nn.Linear(self.latend_dim, self.output_shape),
-#             nn.Linear(self.latend_dim*3, self.output_shape),
-#         )
-        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  
+        # Encoder
+        x1 = self.input_bn(self.input_layer(x))
+        x2 = self.dw1(x1)
+        x3 = self.dw2(x2)
+        x4 = self.dw3(x3)
+        x5 = self.dw4(x4)
 
-#     def reparameterization(self, mean : torch.Tensor, log_var : torch.Tensor) -> torch.Tensor:
-#         epsilon = torch.randn_like(log_var).to(mean.device)
-#         return torch.exp(0.5 * log_var) * epsilon + mean
-    
-#     def forward(self, x: torch.Tensor) -> torch.Tensor:  
-#         x = self.encoder(x)
-#         mean = self.mean_layer(x)
-#         log_var = self.log_var_layer(x)
-#         x = self.reparameterization(mean, log_var)
-#         x = self.decoder(x)
-#         return x, mean, log_var  
+        # Bottleneck
+        # x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
+        x5 = self.bottleneck(x5)
+        # x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
+
+        # Decoder
+        y4 = self.up1(x5, x4)
+        y3 = self.up2(y4, x3)
+        y2 = self.up3(y3, x2)
+        y1 = self.up4(y2, x1)
+
+        # Output
+        y1 = y1.view(y1.size(0), -1)
+        y = self.output_layer(y1)
+        y = y.view(y.size(0), x.size(1), x.size(2))
+
+        return y

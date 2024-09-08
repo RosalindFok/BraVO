@@ -39,7 +39,7 @@ class NSD_DATA():
 
         ## nsddata_betas
         # Info: https://cvnlab.slite.page/p/6CusMRYfk0/Functional-data-NSD#035bbb1e
-        self.nsddata_betas_ppdata_dir_path = join_paths(NSD_dir_path, 'nsddata_betas', 'ppdata', self.subj)
+        self.nsddata_betas_ppdata_betas_dir_path = join_paths(NSD_dir_path, 'nsddata_betas', 'ppdata', self.subj, 'func1mm', 'betas_fithrf_GLMdenoise_RR')
         
         ## nsddata_stimuli
         # Info: https://cvnlab.slite.page/p/NKalgWd__F/Experiments#b44e32c0
@@ -87,24 +87,18 @@ class NSD_DATA():
         print(f'It took {end_time - start_time:.2f} seconds to read {self.stim_info_csv_file_path}.')
         return dict(zip(data_frame['nsdId'], data_frame['cocoId']))
 
-    def read_betas(self, session_id : int, space_type : str = 'func1mm') -> tuple[str, np.ndarray]:
+    def read_betas(self, session_id : int) -> tuple[str, np.ndarray]:
         start_time = time.time()
-        if space_type == 'func1mm':
-            # func1mm and func1pt8mm: https://cvnlab.slite.page/p/6CusMRYfk0/Functional-data-NSD#9065a649
-            func1mm_dir_path = join_paths(self.nsddata_betas_ppdata_dir_path, 'func1mm')
-            betas_fithrf_GLMdenoise_RR_dir_path = join_paths(func1mm_dir_path, 'betas_fithrf_GLMdenoise_RR')
-            # Info: https://cvnlab.slite.page/p/6CusMRYfk0/Functional-data-NSD#3e1740b1
-            file_name = f'betas_session{str(session_id).zfill(2)}.nii.gz'
-            file_path = join_paths(betas_fithrf_GLMdenoise_RR_dir_path, file_name)
-            header, data = read_nii_file(file_path) # dims=(145, 186, 148, 750); dtype=float64
-            assert np.iinfo(np.int16).min <= np.min(data) and np.iinfo(np.int16).max >= np.max(data), 'Data range is not within int16 range.'
-            data = data.astype(np.int16)
-            data = np.transpose(data, (3, 0, 1, 2)) # dims=(750, 145, 186, 148)
-        else:
-            raise NotImplementedError(f'Space type: {space_type} is not supported.')
+        # Info: https://cvnlab.slite.page/p/6CusMRYfk0/Functional-data-NSD#3e1740b1
+        file_name = f'betas_session{str(session_id).zfill(2)}.nii.gz'
+        file_path = join_paths(self.nsddata_betas_ppdata_betas_dir_path, file_name)
+        header, data = read_nii_file(file_path) # dims=(145, 186, 148, 750); dtype=float64
+        assert np.iinfo(np.int16).min <= np.min(data) and np.iinfo(np.int16).max >= np.max(data), 'Data range is not within int16 range.'
+        data = data.astype(np.int16)
+        data = np.transpose(data, (3, 0, 1, 2)) # dims=(750, 145, 186, 148)
         end_time = time.time()
         print(f'It took {end_time - start_time:.2f} seconds to read {file_path}.')
-        return space_type, data
+        return data
         
     def read_stimuli_hdf5(self) -> np.ndarray:
         start_time = time.time()
@@ -323,104 +317,114 @@ class NSD_DATA():
 
         for session_id in responses['SESSION'].unique():
             response = responses[responses['SESSION'] == session_id].to_numpy()
-            space_type, nii_data = self.read_betas(session_id=session_id)
+            nii_data = self.read_betas(session_id=session_id)
             assert len(response) == len(nii_data), f'Number of responses and betas are not equal in session {session_id}.'
             
-            if space_type == 'func1mm':
-                for trial, fmri in tqdm(zip(response, nii_data), total=len(nii_data), desc=f'Processing {self.subj} session {session_id}', leave=True):
-                    # correct trial
-                    if trial[column_of_ISCORRECT] == 1:
-                        run_id = int(trial[column_of_RUN])
-                        trial_id = int(trial[column_of_TRIAL])
-                        session_run_trial_string = f'session{str(session_id).zfill(2)}_run{str(run_id).zfill(2)}_trial{str(trial_id).zfill(2)}'
-                        KID_73 = int(trial[column_of_73KID]) - 1 # 0-based index
-                        # Note: Split data into train and test sets based on whether the 73KID is part of the shared indices.
-                        # Train Set
-                        if not KID_73 in sharedixs:
-                            saved_path = join_paths(train_saved_dir_path, session_run_trial_string)
-                        # Test Set
-                        else:
-                            saved_path = join_paths(test_saved_dir_path, session_run_trial_string)
-                        check_and_make_dirs(saved_path)
-                        
-                        if len(os.listdir(saved_path)) == len(['canny', 'fmri', 'image', 'strings', 'hidden_states', 'causal_attention_mask']): 
-                            continue
-                        elif len(os.listdir(saved_path)) > 5:
-                            print(f'Check files in {saved_path}')
-                            exit(1)
+            for trial, fmri in tqdm(zip(response, nii_data), total=len(nii_data), desc=f'Processing {self.subj} session {session_id}', leave=True):
+                # correct trial
+                if trial[column_of_ISCORRECT] == 1:
+                    run_id = int(trial[column_of_RUN])
+                    trial_id = int(trial[column_of_TRIAL])
+                    session_run_trial_string = f'session{str(session_id).zfill(2)}_run{str(run_id).zfill(2)}_trial{str(trial_id).zfill(2)}'
+                    KID_73 = int(trial[column_of_73KID]) - 1 # 0-based index
+                    # Note: Split data into train and test sets based on whether the 73KID is part of the shared indices.
+                    # Train Set
+                    if not KID_73 in sharedixs:
+                        saved_path = join_paths(train_saved_dir_path, session_run_trial_string)
+                    # Test Set
+                    else:
+                        saved_path = join_paths(test_saved_dir_path, session_run_trial_string)
+                    check_and_make_dirs(saved_path)
+                    
+                    if len(os.listdir(saved_path)) == len(['canny', 'fmri', 'image', 'strings', 'hidden_states', 'causal_attention_mask']): 
+                        continue
+                    elif len(os.listdir(saved_path)) > 5:
+                        print(f'Check files in {saved_path}')
+                        exit(1)
 
-                        # fMRI
-                        save_nii_file(fmri, join_paths(saved_path, 'fmri.nii.gz'))
+                    # fMRI
+                    save_nii_file(fmri, join_paths(saved_path, 'fmri.nii.gz'))
 
-                        # image: BLIP-2 encodes via RGB
-                        image = Image.fromarray(imgBrick[KID_73])
-                        image.save(join_paths(saved_path, 'image.png'))
-                        # canny
+                    # image: BLIP-2 encodes via RGB
+                    image = Image.fromarray(imgBrick[KID_73])
+                    image.save(join_paths(saved_path, 'image.png'))
+
+                    # canny
+                    canny_image = preprocess_canny(input_image=imgBrick[KID_73].astype(np.uint8), 
+                                                   image_resolution=imgBrick[KID_73].shape[0], 
+                                                   low_threshold=100, high_threshold=200
+                                                )
+                    canny = np.array(canny_image)
+                    if not np.max(canny) > np.min(canny):
                         canny_image = preprocess_canny(input_image=imgBrick[KID_73].astype(np.uint8), 
                                                        image_resolution=imgBrick[KID_73].shape[0], 
-                                                       low_threshold=100, high_threshold=200
+                                                       low_threshold=np.min(canny)//2, high_threshold=np.max(canny)//2
                                                     )
-                        canny = np.array(canny_image)
-                        if not np.max(canny) > np.min(canny):
-                            canny_image = preprocess_canny(input_image=imgBrick[KID_73].astype(np.uint8), 
-                                                           image_resolution=imgBrick[KID_73].shape[0], 
-                                                           low_threshold=np.min(canny)//2, high_threshold=np.max(canny)//2
-                                                        )
-                        canny = np.array(canny_image)
-                        assert np.max(canny) > np.min(canny), f'Canny image is all black in path={saved_path}!'
-                        canny_image.save(join_paths(saved_path, 'canny.png'))
+                    canny = np.array(canny_image)
+                    assert np.max(canny) > np.min(canny), f'Canny image is all black in path={saved_path}!'
+                    canny_image.save(join_paths(saved_path, 'canny.png'))
 
-                        # old_flag, captions and categories
-                        OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
-                        captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
-                        category_list = categories_dict[stim_info[KID_73]] # list[dict[str, any]], [{'supercategory', 'name', 'area}]
-                        
-                        # Add image and caption to sample
-                        itm_max, selected_caption = -1, ''
-                        sample = {}
-                        sample['cond_images'] = bd_vis_processors['eval'](image).unsqueeze(0).to(device)
-                        sample['prompt'] = captions_list
+                    # old_flag, captions and categories
+                    OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
+                    captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
+                    category_list = categories_dict[stim_info[KID_73]] # list[dict[str, any]], [{'supercategory', 'name', 'area}]
+                    
+                    # Add image and caption to sample
+                    sample = {}
+                    sample['cond_images'] = bd_vis_processors['eval'](image).unsqueeze(0).to(device)
+                    sample['prompt'] = captions_list
+                    # Select the category with the biggest area
+                    area_of_each_category = {}
+                    for category in category_list:
+                        name = category['name']
+                        area = category['area']
+                        if name in area_of_each_category:
+                            area_of_each_category[name] += area
+                        else:
+                            area_of_each_category[name] = area
+                    max_key = max(area_of_each_category, key=lambda k: area_of_each_category[k])
+                    max_key_processed = [bd_txt_processors['eval'](max_key)]
+                    sample['cond_subject'] = max_key_processed
+                    sample['tgt_subject']  = max_key_processed
 
-                        # Select the category with the biggest area
-                        area_of_each_category = {}
-                        for category in category_list:
-                            name = category['name']
-                            area = category['area']
-                            if name in area_of_each_category:
-                                area_of_each_category[name] += area
-                            else:
-                                area_of_each_category[name] = area
-                        max_key = max(area_of_each_category, key=lambda k: area_of_each_category[k])
-                        max_key_processed = [bd_txt_processors['eval'](max_key)]
-                        sample['cond_subject'] = max_key_processed
-                        sample['tgt_subject']  = max_key_processed
-
-                        # Extract the embedding and save it as a npy file
-                        hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
-                        assert hidden_states.shape == (1, 77, 768), f'In {saved_path}, embedding shape is {hidden_states.shape}, not (1, 77, 768).'
-                        assert causal_attention_mask.shape == (1, 1, 77, 77), f'In {saved_path}, causal_attention_mask shape is {causal_attention_mask.shape}, not (1, 1, 77, 77).'
-                        hidden_states = hidden_states.cpu().numpy()
-                        causal_attention_mask = causal_attention_mask.cpu().numpy()
-                        np.save(join_paths(saved_path, 'hidden_states.npy'), hidden_states)
-                        np.save(join_paths(saved_path, 'causal_attention_mask.npy'), causal_attention_mask)
-
-                        # Save the strings to json file
-                        json_data = {
-                            'isold' : 'novel' if OLD_flag == 0 else 'old', # str
-                            'selected_caption' : selected_caption, # str
-                            'captions_list' : captions_list, # list[str]
-                            'selected_category' : max_key, # str
-                            'instances_category' : category_list, #  list[dict[str, any]]
-                        }
-                        write_json_file(path = join_paths(saved_path, 'strings.json'), data = json_data)
-
-                    # incorrect trial
-                    else:
-                        continue
-
-            else:
-                raise NotImplementedError(f'Space type: {space_type} is not supported.')
+                    # Extract the embedding and save it as a npy file
+                    hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
+                    assert hidden_states.shape == (1, 77, 768), f'In {saved_path}, embedding shape is {hidden_states.shape}, not (1, 77, 768).'
+                    assert causal_attention_mask.shape == (1, 1, 77, 77), f'In {saved_path}, causal_attention_mask shape is {causal_attention_mask.shape}, not (1, 1, 77, 77).'
+                    hidden_states = hidden_states.cpu().numpy()
+                    causal_attention_mask = causal_attention_mask.cpu().numpy()
+                    np.save(join_paths(saved_path, 'hidden_states.npy'), hidden_states)
+                    np.save(join_paths(saved_path, 'causal_attention_mask.npy'), causal_attention_mask)
+                    
+                    # Save the strings to json file
+                    json_data = {
+                        'isold' : 'novel' if OLD_flag == 0 else 'old', # str
+                        'captions_list' : captions_list, # list[str]
+                        'selected_category' : max_key, # str
+                        'instances_category' : category_list, #  list[dict[str, any]]
+                    }
+                    write_json_file(path = join_paths(saved_path, 'strings.json'), data = json_data)
+                
+                # incorrect trial
+                else:
+                    continue
         
+        # check if all causal_attention_mask are the same
+        causal_attention_mask_paths_list = []
+        get_all_dirs = lambda path: [join_paths(path, x) for x in os.listdir(path)]
+        for dir_path in get_all_dirs(train_saved_dir_path)+get_all_dirs(test_saved_dir_path):
+            for files in os.listdir(dir_path):
+                if files == 'causal_attention_mask.npy':
+                    causal_attention_mask_paths_list.append(join_paths(dir_path, files))
+        assert len(causal_attention_mask_paths_list) > 0, f'No causal_attention_mask found in {train_saved_dir_path} and {test_saved_dir_path}.'
+        reference_array = np.load(causal_attention_mask_paths_list[0], allow_pickle=True)
+        for file_path in tqdm(causal_attention_mask_paths_list[1:], desc='Checking causal_attention_mask', leave=True):
+            current_array = np.load(file_path, allow_pickle=True) 
+            assert np.array_equal(reference_array, current_array), f'In {file_path}, causal_attention_mask is not equal to the reference array.'
+        np.save(join_paths(self.subject_saved_dir_path, 'causal_attention_mask.npy'), reference_array)
+        for file_path in causal_attention_mask_paths_list:
+            os.remove(file_path)
+
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
 
 # make pairs of NSD

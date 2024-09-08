@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
+from collections import namedtuple 
 from torch.utils.data import Dataset
 
 from config import configs_dict
@@ -18,16 +19,18 @@ __all__ = ['NSD_Dataset',
 ###### NSD Dataset #####
 ######################## 
 
-def make_paths_dict(subj_path : str, task : str) -> tuple[dict[str, dict[str, str]], 
-                                                          dict[str, dict[str, list[str]]],
-                                                          np.ndarray]:
+def make_paths_dict(subj_path : str) -> tuple[dict[str, dict[str, str]], 
+                                              dict[str, dict[str, str]], 
+                                              dict[str, dict[str, list[str]]],
+                                              np.ndarray, np.ndarray]:
     """  
     """  
     rois_path = join_paths(subj_path, 'ROIs')
     assert os.path.exists(rois_path), f'dir_path={rois_path} does not exist.'
     uncond_embedding_npy_path = join_paths(subj_path, 'uncond_embedding.npy')
     assert os.path.exists(uncond_embedding_npy_path), f'file path={uncond_embedding_npy_path} does not exist.'
-    assert task in ['train', 'test'], f'task={task} not in ["train", "test"]'
+    causal_attention_mask_path = join_paths(subj_path, 'causal_attention_mask.npy')
+    assert os.path.exists(causal_attention_mask_path), f'file path={causal_attention_mask_path} does not exist.'
 
     def __make_path_dict__(mode : str) -> dict[str, dict[str, str]]:
         """  
@@ -39,14 +42,15 @@ def make_paths_dict(subj_path : str, task : str) -> tuple[dict[str, dict[str, st
         find_and_join_paths = lambda trail_path, string: [os.path.join(trail_path, filename) for filename in os.listdir(trail_path) if string+'.' in filename]
         for index, trail_path in enumerate(trial_paths_list):
             trial_path_dict[index] = {}
-            for key in ['fmri', 'image', 'canny', 'multimodal_embedding','strings']:
+            for key in ['fmri', 'image', 'canny', 'hidden_states', 'strings']:
                 path_list = find_and_join_paths(trail_path=trail_path, string=key)
                 assert len(path_list) > 0, f'No {key} files found in {trail_path}.'
                 assert len(path_list) == 1, f'Multiple {key} files found in {trail_path}.'
                 trial_path_dict[index][key] = path_list[0]
         return trial_path_dict
         
-    trial_path_dict = __make_path_dict__(mode = task)
+    train_trial_path_dict = __make_path_dict__(mode = 'train')
+    test_trial_path_dict  = __make_path_dict__(mode = 'test')
 
     # ROIs
     rois_path_dict = {} # {key=surface or volume, value=dict{key=roi_name, value=list[roi_path]}}
@@ -58,9 +62,12 @@ def make_paths_dict(subj_path : str, task : str) -> tuple[dict[str, dict[str, st
             rois_path_dict[derived_type][roi_name] = [join_paths(roi_name_path, x) for x in os.listdir(roi_name_path)]
 
     # uncond_embedding
-    uncond_embedding = np.load(uncond_embedding_npy_path)
-    assert uncond_embedding.shape == (77, 768), f'uncond_embedding.shape={uncond_embedding.shape} != (77, 768)'
-    return trial_path_dict, rois_path_dict, uncond_embedding
+    uncond_embedding = np.load(uncond_embedding_npy_path, allow_pickle=True)
+    assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} != (1, 77, 768)'
+    # causal_attention_mask
+    causal_attention_mask = np.load(causal_attention_mask_path, allow_pickle=True)
+    assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask.shape={causal_attention_mask.shape} != (1, 1, 77, 77)'
+    return train_trial_path_dict, test_trial_path_dict, rois_path_dict, uncond_embedding, causal_attention_mask
 
 def fetch_roi_files_and_labels(derived_type : str, roi_name : str, thresholds : list[int] | list[None],
                                rois_path_dict : dict[str, dict[str, list[str]]]
@@ -147,7 +154,7 @@ def make_hdf5(trial_path_dict : dict[str, dict[str, str]],
             print(f'{hdf5_path} is removed.')
 
     blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
-    mask_header, mask_data = read_nii_file([x for x in mask_path_list if '.nii.gz' in x and not 'lh.' in x and not 'rh.' in x][0])
+    _, mask_data = read_nii_file([x for x in mask_path_list if '.nii.gz' in x and not 'lh.' in x and not 'rh.' in x][0])
     thresholds = thresholds if not len(thresholds) == 0 else list(range(1, int(np.max(mask_data))+1))
 
     with h5py.File(hdf5_path, 'w') as hdf5_file:
@@ -155,14 +162,18 @@ def make_hdf5(trial_path_dict : dict[str, dict[str, str]],
             hdf5_group = hdf5_file.create_group(name=str(index))
             # path
             image_path = path_dict['image']
-            canny_path = path_dict['canny']
-            multimodal_embedding_path = path_dict['multimodal_embedding']
+            canny_path = path_dict['canny'] 
+            hidden_states_path = path_dict['hidden_states']
             fmri_path = path_dict['fmri']
             # data
-            fmri_header, fmri_data = read_nii_file(fmri_path) # Shape of fmri_data: [145, 186, 148]
+            _, fmri_data = read_nii_file(fmri_path) # Shape of fmri_data: [145, 186, 148]
             masked_data = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
+            masked_data = (masked_data - np.min(masked_data)) / (np.max(masked_data) - np.min(masked_data)) # to 0~1
             reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
-            masked_data = (((masked_data - np.min(masked_data)) / (np.max(masked_data) - np.min(masked_data)))*(np.iinfo(np.uint8).max)).astype(np.uint8)
+            if min(reshape_a, reshape_b) == 1:
+                masked_data = np.append(masked_data, 0)
+                reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
+            masked_data = (masked_data*(np.iinfo(np.uint8).max)).astype(np.uint8) # to 0~255
             masked_data = masked_data.reshape(1, reshape_a, reshape_b).repeat(3, axis=0)
             masked_data = np.transpose(masked_data, (1, 2, 0))
             masked_data = Image.fromarray(masked_data)
@@ -171,25 +182,21 @@ def make_hdf5(trial_path_dict : dict[str, dict[str, str]],
                 'cond_images' : masked_data,
                 'prompt' : [bd_txt_processors['eval']('')],
                 'cond_subject' : 'fMRI',
-                'tgt_subject' : 'fMRI'
+                'tgt_subject' : 'natural scenes image'
             }     
-            masked_embedding = blip_diffusion_model.generate_embedding(
-                                samples=sample,
-                                neg_prompt=configs_dict['blip_diffusion']['negative_prompt'],
-                                guidance_scale=configs_dict['blip_diffusion']['guidance_scale'],
-                            ) 
-
-            masked_embedding = masked_embedding[-1].cpu().numpy()
+            masked_embedding, _ = blip_diffusion_model.generate_embedding(samples=sample) 
+            masked_embedding = masked_embedding[-1].squeeze().cpu().numpy()
             image_data = np.array(Image.open(image_path))
             canny_data = np.array(Image.open(canny_path))
-            multimodal_embedding  = np.load(multimodal_embedding_path)
-            assert masked_embedding.shape == multimodal_embedding.shape, f'masked_embedding.shape={masked_embedding.shape} != multimodal_embedding.shape={multimodal_embedding.shape}'
-            for name, data in zip(['masked_embedding', 'image', 'canny', 'multimodal_embedding'], 
-                                  [masked_embedding, image_data, canny_data, multimodal_embedding]):
+            hidden_states = np.squeeze(np.load(hidden_states_path, allow_pickle=True))
+            for name, data in zip(['masked_embedding', 'image', 'canny', 'hidden_states'], 
+                                  [masked_embedding, image_data, canny_data, hidden_states]):
                 hdf5_dataset = hdf5_group.create_dataset(name=name, shape=data.shape, dtype=data.dtype)
                 hdf5_dataset[:] = data
     print(f'{hdf5_path} is created, the size of it is {get_file_size(hdf5_path)}')
 
+DataPoint = namedtuple('DataPoint', ['index', 'masked_embedding_image', 'masked_embedding_caption',   
+                                     'image', 'canny', 'hidden_states_image', 'hidden_states_caption'])  
 class NSD_HDF5_Dataset(Dataset):
     """
     load proprocessed data from hdf5 file
@@ -199,14 +206,28 @@ class NSD_HDF5_Dataset(Dataset):
         assert os.path.exists(hdf5_path), f'{hdf5_path} does not exist.'
         self.hdf5_file = h5py.File(hdf5_path, 'r') 
 
-    def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __split_and_concat__(self, array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        array_1, array_2, arrayr_3 = np.split(array, [2, 18]) # BLIP decides, 77 = 2+16+59
+        image_embedding = array_2
+        text_embedding = np.concatenate((array_1, arrayr_3), axis=0)
+        return image_embedding, text_embedding
+
+    def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         data = self.hdf5_file[str(index)]
         masked_embedding = data['masked_embedding'][:]
         image = data['image'][:]
         canny = data['canny'][:]
-        multimodal_embedding = data['multimodal_embedding'][:]
-        # Shape: masked_embedding([77, 768]), image_data([425, 425, 3]), canny_data([425, 425]), multimodal_embedding([77, 768])
-        return index, masked_embedding, image, canny, multimodal_embedding
+        hidden_states = data['hidden_states'][:]
+        masked_embedding_image, masked_embedding_caption = self.__split_and_concat__(masked_embedding)
+        hidden_states_image, hidden_states_caption = self.__split_and_concat__(hidden_states)
+        masked_embedding_image = torch.tensor(masked_embedding_image, dtype=torch.float32) # [16, 768]
+        masked_embedding_caption = torch.tensor(masked_embedding_caption, dtype=torch.float32)   # [61, 768]
+        image = torch.tensor(image, dtype=torch.float32)                                   # [425, 425, 3]
+        canny = torch.tensor(canny, dtype=torch.float32)                                   # [448, 448, 3] 
+        hidden_states_image = torch.tensor(hidden_states_image, dtype=torch.float32)       # [16, 768]
+        hidden_states_caption = torch.tensor(hidden_states_caption, dtype=torch.float32)   # [61, 768]
+        return DataPoint(index, masked_embedding_image, masked_embedding_caption, 
+                         image, canny, hidden_states_image, hidden_states_caption)
 
     def __len__(self) -> int:
         return len(self.hdf5_file.keys())

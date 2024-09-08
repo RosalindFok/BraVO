@@ -1071,7 +1071,7 @@ class BlipDiffusion(BaseModel):
         def load_state_dict(module, filename):
             try:
                 state_dict = torch.load(
-                    os.path.join(checkpoint_dir_or_url, filename), map_location="cpu"
+                    os.path.join(checkpoint_dir_or_url, filename), map_location="cpu", weights_only=True
                 )
                 msg = module.load_state_dict(state_dict, strict=False)
             except FileNotFoundError:
@@ -1088,7 +1088,7 @@ class BlipDiffusion(BaseModel):
                 os.path.join(
                     checkpoint_dir_or_url, "ctx_embeddings_cache/ctx_embeddings_cache.pt"
                 ),
-                map_location=self.device,
+                map_location=self.device, weights_only=True
             )
             self._use_embeddings_cache = True
             print("Loaded ctx_embeddings_cache from {}".format(checkpoint_dir_or_url))

@@ -107,18 +107,18 @@ def get_file_size(file_path : str) -> str:
     while size >= 1024 and unit_index < len(units) - 1:  
         size /= 1024.0  
         unit_index += 1
-    return f'{size} {units[unit_index]}.'
+    return f'{size:.4f} {units[unit_index]}.'
 
 ''' paths '''
 NSD_dir_path = join_paths('..', 'dataset', 'NSD')
 fMRI_Shape_dir_path = join_paths('..', 'dataset', 'fMRI_Shape')
 BraVO_saved_dir_path = join_paths('..', 'BraVO_saved')
 check_and_make_dirs(BraVO_saved_dir_path)
-NSD_saved_dir_path = join_paths(BraVO_saved_dir_path, 'NSD_preprocessed_pairs')
-check_and_make_dirs(NSD_saved_dir_path)
-fmrishape_saved_dir_path = join_paths(BraVO_saved_dir_path, 'fMRIShape_preprocessed_pairs')
-check_and_make_dirs(fmrishape_saved_dir_path)
 train_results_dir_path = join_paths(BraVO_saved_dir_path, 'train_results')
 check_and_make_dirs(train_results_dir_path)
 test_results_dir_path = join_paths(BraVO_saved_dir_path, 'test_results')
 check_and_make_dirs(test_results_dir_path)
+NSD_saved_dir_path = join_paths(BraVO_saved_dir_path, 'NSD_preprocessed_pairs')
+check_and_make_dirs(NSD_saved_dir_path)
+fmrishape_saved_dir_path = join_paths(BraVO_saved_dir_path, 'fMRIShape_preprocessed_pairs')
+check_and_make_dirs(fmrishape_saved_dir_path)

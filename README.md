@@ -6,7 +6,8 @@ Decoding(解码): Engineering issues, neural activity $\rightarrow$ visual stimu
 Encoding(编码): Scientific issues, visual stimulation $\rightarrow$ neural activity
 
 ## Platform
-Beijing Super Cloud Computing Center - N32EA14P: `NVIDIA A100-PCIE-40GB*8`
+Beijing Super Cloud Computing Center - N32EA14P: `NVIDIA A100-PCIE-40GB * 8`
+Ningxia Super Cloud Computing Center - N40R4:    `NVIDIA GeForce RTX 4090-24GB * 8`
 ``` shell
 chmod 777 *.sh
 sbatch --gpus=num_gpus -p gpu run.sh # submit the job
@@ -94,11 +95,14 @@ run ``  for subj 01, 02, 05, 07
 **Step 2:**
 ``` shell
 # Preprocess data
-sbatch --gpus=2 -p gpu step1_run.sh
+sbatch --gpus=2 -p gpu step1_run.sh      # N32EA14P
+sbatch -p gpu_4090 --gpus=2 step1_run.sh # N40R4
 # Train
-sbatch --gpus=6 -p gpu step2_run.sh  
+sbatch --gpus=1 -p gpu step2_run.sh      # N32EA14P
+sbatch -p gpu_4090 --gpus=1 step2_run.sh # N40R4
 # Test and Generate
-sbatch --gpus=1 -p gpu step3_run.sh
+sbatch --gpus=1 -p gpu step3_run.sh      # N32EA14P
+sbatch -p gpu_4090 --gpus=1 step3_run.sh # N40R4
 ```
 
 ## Delete the Enviorment:

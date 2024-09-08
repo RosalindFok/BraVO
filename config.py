@@ -6,14 +6,16 @@ configs_dict = {
 
     'NSD_ROIs' : {
         'derived_type' : 'surface',
-        'roi_name' : 'corticalsulc',
-        'thresholds' : [],
+        'roi_name' : 'prf-visualrois',# corticalsulc
+        # primary_visual_cortex : [1, 2, 3, 4],    v1v, v1d, v2v, v2d
+        # higher_visual_cortex  : [3, 4, 5, 6, 7]  v2v, v2d, v3v, v3d, hv4
+        'thresholds' : [1, 2, 3, 4],
     },
 
     'train_decoder' : {
-        'batch_size' : 48, # 48 <--> 1 cuda   ye xu ke yi tiao da dian shi shi
-        'learning_rate' : 1e-4,
-        'epochs' : 500,
+        'batch_size' : 256, 
+        'learning_rate' : 1e-3,
+        'epochs' : 20,
     },
 
     'blip_diffusion' :{
