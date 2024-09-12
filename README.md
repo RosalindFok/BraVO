@@ -39,7 +39,8 @@ scancel job_id # cancel the job via its id
 
 ## Prepare the Enviorment:
 ``` shell
-module load anaconda/2021.11 cuda/12.1
+module load anaconda/2021.11 cuda/12.1 # N32EA14P
+module load anaconda/2022.10 cuda/12.1 # N40R4
 conda create --name BraVO python=3.11
 source activate BraVO
 
@@ -97,10 +98,10 @@ run ``  for subj 01, 02, 05, 07
 # Preprocess data
 sbatch --gpus=2 -p gpu step1_run.sh      # N32EA14P
 sbatch -p gpu_4090 --gpus=2 step1_run.sh # N40R4
-# Train
+# Train and Test
 sbatch --gpus=1 -p gpu step2_run.sh      # N32EA14P
 sbatch -p gpu_4090 --gpus=1 step2_run.sh # N40R4
-# Test and Generate
+# Generate
 sbatch --gpus=1 -p gpu step3_run.sh      # N32EA14P
 sbatch -p gpu_4090 --gpus=1 step3_run.sh # N40R4
 ```

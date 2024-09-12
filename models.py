@@ -134,15 +134,13 @@ class Caption_Decoder(nn.Module):
         self.dw2 = Down(in_channels=128, out_channels=256)
         self.dw3 = Down(in_channels=256, out_channels=512)
         self.dw4 = Down(in_channels=512, out_channels=1024)
-        # # encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=2048, batch_first=True)  
-        # encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=1024, batch_first=True)  
-        # self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=6)
-        self.bottleneck = nn.Conv1d(in_channels=1024, out_channels=1024, kernel_size=3, padding=1)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=1024, nhead=8, dim_feedforward=2048, batch_first=True)  
+        self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=6)
         self.up1 = Up(in_channels=1024, out_channels=512)
         self.up2 = Up(in_channels=512, out_channels=256)
         self.up3 = Up(in_channels=256, out_channels=128)
         self.up4 = Up(in_channels=128, out_channels=64)
-        self.output_layer = nn.Linear(64*input_shape[1], output_shape[0]*output_shape[1])
+        self.output_layer = nn.Conv1d(in_channels=64, out_channels=output_shape[0], kernel_size=1, padding=0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  
         # Encoder
@@ -153,9 +151,9 @@ class Caption_Decoder(nn.Module):
         x5 = self.dw4(x4)
 
         # Bottleneck
-        # x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
+        x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
         x5 = self.bottleneck(x5)
-        # x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
+        x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
 
         # Decoder
         y4 = self.up1(x5, x4)
@@ -164,9 +162,7 @@ class Caption_Decoder(nn.Module):
         y1 = self.up4(y2, x1)
 
         # Output
-        y1 = y1.view(y1.size(0), -1)
         y = self.output_layer(y1)
-        y = y.view(y.size(0), x.size(1), x.size(2))
 
         return y
 
@@ -183,15 +179,14 @@ class Image_Decoder(nn.Module):
         self.dw2 = Down(in_channels=64, out_channels=128)
         self.dw3 = Down(in_channels=128, out_channels=256)
         self.dw4 = Down(in_channels=256, out_channels=512)
-        # # encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=2048, batch_first=True)  
-        # encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=1024, batch_first=True)  
-        # self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=6)
-        self.bottleneck = nn.Conv1d(in_channels=512, out_channels=512, kernel_size=3, padding=1)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=1024, batch_first=True)  
+        self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=6)
         self.up1 = Up(in_channels=512, out_channels=256)
         self.up2 = Up(in_channels=256, out_channels=128)
         self.up3 = Up(in_channels=128, out_channels=64)
         self.up4 = Up(in_channels=64, out_channels=32)
-        self.output_layer = nn.Linear(32*input_shape[1], output_shape[0]*output_shape[1])
+        # self.output_layer = nn.Conv1d(in_channels=32, out_channels=output_shape[0], kernel_size=1, padding=0)
+        self.output_layer = nn.Linear(in_features=32*input_shape[1], out_features=output_shape[0]*output_shape[1])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  
         # Encoder
@@ -202,9 +197,9 @@ class Image_Decoder(nn.Module):
         x5 = self.dw4(x4)
 
         # Bottleneck
-        # x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
+        x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
         x5 = self.bottleneck(x5)
-        # x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
+        x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
 
         # Decoder
         y4 = self.up1(x5, x4)

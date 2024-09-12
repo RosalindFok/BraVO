@@ -1,4 +1,5 @@
 import os
+import gc
 import h5py
 import copy
 import torch
@@ -8,9 +9,8 @@ from tqdm import tqdm
 from collections import namedtuple 
 from torch.utils.data import Dataset
 
-from config import configs_dict
 from models import device, load_blip_models
-from utils import join_paths, read_nii_file, read_json_file, get_file_size
+from utils import join_paths, read_nii_file, check_and_make_dirs, read_json_file, get_file_size
 
 __all__ = ['NSD_Dataset',
            'make_paths_dict', 'fetch_roi_files_and_labels']
@@ -40,7 +40,7 @@ def make_paths_dict(subj_path : str) -> tuple[dict[str, dict[str, str]],
         trial_paths_list = [join_paths(dir_path, x) for x in os.listdir(dir_path)]
         trial_path_dict = {}
         find_and_join_paths = lambda trail_path, string: [os.path.join(trail_path, filename) for filename in os.listdir(trail_path) if string+'.' in filename]
-        for index, trail_path in enumerate(trial_paths_list):
+        for index, trail_path in tqdm(enumerate(trial_paths_list), desc=f'Making {mode} paths dict', leave=True, total=len(trial_paths_list)):
             trial_path_dict[index] = {}
             for key in ['fmri', 'image', 'canny', 'hidden_states', 'strings']:
                 path_list = find_and_join_paths(trail_path=trail_path, string=key)
@@ -113,7 +113,7 @@ def fetch_roi_files_and_labels(derived_type : str, roi_name : str, thresholds : 
 def make_hdf5(trial_path_dict : dict[str, dict[str, str]], 
               mask_path_list : list[str], 
               thresholds : list[int] | list[None],
-              hdf5_path : str, device : torch.device = device
+              hdf5_path : str, temp_dir_path : str, device : torch.device = device
             ) -> None:
     """  
     """ 
@@ -154,46 +154,70 @@ def make_hdf5(trial_path_dict : dict[str, dict[str, str]],
             print(f'{hdf5_path} is removed.')
 
     blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
-    _, mask_data = read_nii_file([x for x in mask_path_list if '.nii.gz' in x and not 'lh.' in x and not 'rh.' in x][0])
+    _, mask_data = read_nii_file([x for x in mask_path_list if '.nii.gz' in x and all(sub not in x for sub in ['lh.', 'rh.'])][0])
     thresholds = thresholds if not len(thresholds) == 0 else list(range(1, int(np.max(mask_data))+1))
 
-    with h5py.File(hdf5_path, 'w') as hdf5_file:
-        for index, path_dict in tqdm(trial_path_dict.items(), desc=f'{hdf5_path.split(os.sep)[-1]}', leave=True):
-            hdf5_group = hdf5_file.create_group(name=str(index))
-            # path
-            image_path = path_dict['image']
-            canny_path = path_dict['canny'] 
-            hidden_states_path = path_dict['hidden_states']
-            fmri_path = path_dict['fmri']
-            # data
-            _, fmri_data = read_nii_file(fmri_path) # Shape of fmri_data: [145, 186, 148]
-            masked_data = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
-            masked_data = (masked_data - np.min(masked_data)) / (np.max(masked_data) - np.min(masked_data)) # to 0~1
+    npz_files_path_dict = {} # {index : path}
+    reshape_a, reshape_b = -99, -99
+    for index, path_dict in tqdm(trial_path_dict.items(), desc=f'Masking fMRI and Reading imgs', leave=True):
+        npz_path = join_paths(temp_dir_path, f'{index}.npz')
+        npz_files_path_dict[index] = npz_path
+        # check
+        if os.path.exists(npz_path):
+            data = np.load(npz_path)
+            del data
+            continue
+        # path
+        image_path = path_dict['image']
+        canny_path = path_dict['canny'] 
+        hidden_states_path = path_dict['hidden_states']
+        fmri_path = path_dict['fmri']
+        # data
+        _, fmri_data = read_nii_file(fmri_path) # Shape of fmri_data: [145, 186, 148]
+        masked_data = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
+        masked_data = (masked_data - np.min(masked_data)) / (np.max(masked_data) - np.min(masked_data)) # to 0~1
+        if max(reshape_a, reshape_b) <= 0:
             reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
             if min(reshape_a, reshape_b) == 1:
                 masked_data = np.append(masked_data, 0)
                 reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
-            masked_data = (masked_data*(np.iinfo(np.uint8).max)).astype(np.uint8) # to 0~255
-            masked_data = masked_data.reshape(1, reshape_a, reshape_b).repeat(3, axis=0)
-            masked_data = np.transpose(masked_data, (1, 2, 0))
-            masked_data = Image.fromarray(masked_data)
-            masked_data = bd_vis_processors['eval'](masked_data).unsqueeze(0).to(device)
+        masked_data = (masked_data*(np.iinfo(np.uint8).max)).astype(np.uint8) # to 0~255
+        masked_data = masked_data.reshape(1, reshape_a, reshape_b).repeat(3, axis=0)
+        masked_data = np.transpose(masked_data, (1, 2, 0))
+        masked_data = Image.fromarray(masked_data)
+        masked_data = bd_vis_processors['eval'](masked_data).cpu().numpy()
+        np.savez(npz_path,  masked_data=masked_data,
+                            image=np.array(Image.open(image_path)),
+                            canny=np.array(Image.open(canny_path)),
+                            hidden_states=np.squeeze(np.load(hidden_states_path, allow_pickle=True))
+            )
+        del masked_data, fmri_data
+
+    prompt =  [bd_txt_processors['eval']('')]   
+
+    with h5py.File(hdf5_path, 'w') as hdf5_file:
+        for index, npz_path in tqdm(npz_files_path_dict.items(), desc=f'{hdf5_path.split(os.sep)[-1]}', leave=True):
+            hdf5_group = hdf5_file.create_group(name=str(index))
+            content = np.load(npz_path, allow_pickle=True)
+            cond_images = torch.from_numpy(content['masked_data']).unsqueeze(0).to(device)
             sample = {
-                'cond_images' : masked_data,
-                'prompt' : [bd_txt_processors['eval']('')],
+                'cond_images' : cond_images,
+                'prompt' : prompt,
                 'cond_subject' : 'fMRI',
-                'tgt_subject' : 'natural scenes image'
+                'tgt_subject'  : 'natural scenes image'
             }     
             masked_embedding, _ = blip_diffusion_model.generate_embedding(samples=sample) 
             masked_embedding = masked_embedding[-1].squeeze().cpu().numpy()
-            image_data = np.array(Image.open(image_path))
-            canny_data = np.array(Image.open(canny_path))
-            hidden_states = np.squeeze(np.load(hidden_states_path, allow_pickle=True))
             for name, data in zip(['masked_embedding', 'image', 'canny', 'hidden_states'], 
-                                  [masked_embedding, image_data, canny_data, hidden_states]):
+                                  [masked_embedding, content['image'], content['canny'],  content['hidden_states']]):
                 hdf5_dataset = hdf5_group.create_dataset(name=name, shape=data.shape, dtype=data.dtype)
                 hdf5_dataset[:] = data
     print(f'{hdf5_path} is created, the size of it is {get_file_size(hdf5_path)}')
+
+    # Release memory and garbage collect
+    del blip_diffusion_model, bd_vis_processors, bd_txt_processors
+    torch.cuda.empty_cache()
+    gc.collect() 
 
 DataPoint = namedtuple('DataPoint', ['index', 'masked_embedding_image', 'masked_embedding_caption',   
                                      'image', 'canny', 'hidden_states_image', 'hidden_states_caption'])  
