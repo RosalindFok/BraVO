@@ -69,9 +69,11 @@ pip install moviepy -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Successfully 
 pip install peft -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Successfully installed accelerate-0.32.1 peft-0.11.1 psutil-6.0.0
 pip install easydict -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Successfully installed easydict-1.13
 pip install nltk -i https://pypi.tuna.tsinghua.edu.cn/simple/ # Successfully installed joblib-1.4.2 nltk-3.8.1
+
+cd SAM2 && pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple/ && cd .. # Successfully built SAM-2. Installing collected packages: hydra-core, SAM-2. Successfully installed SAM-2-1.0 hydra-core-1.3.2
 ```
 
-## Prepare the Data:
+## Prepare the Data and Models:
 1. bert-base-uncased
 Download files from `https://hf-mirror.com/google-bert/bert-base-uncased/tree/main` and put them under `../large_files_for_BraVO/bert-base-uncased` <br>
 
@@ -81,17 +83,23 @@ Download files from `https://hf-mirror.com/runwayml/stable-diffusion-v1-5/tree/m
 3. blip-diffusion
 Download tar.gz from `https://storage.googleapis.com/sfr-vision-language-research/LAVIS/models/BLIP-Diffusion/blip-diffusion.tar.gz`, untar it and put the whole folder under `../large_files_for_BraVO/blip-diffusion`  <br>
 
-4. [The Natural Scenes Dataset(NSD)](https://naturalscenesdataset.org/)
+4. google/flan-t5-xl
+Download files from `https://hf-mirror.com/google/flan-t5-xl/tree/main` and put them under `../large_files_for_BraVO/flan-t5-xl`
+
+5. [The Natural Scenes Dataset(NSD)](https://naturalscenesdataset.org/)
 > Allen, E.J., St-Yves, G., Wu, Y., Breedlove, J.L., Prince, J.S., Dowdle, L.T., Nau, M., Caron, B., Pestilli, F., Charest, I., Hutchinson, J.B., Naselaris, T.*, Kay, K.* A massive 7T fMRI dataset to bridge cognitive neuroscience and artificial intelligence. Nature Neuroscience (2021).
 **Note:**
 - Full data: subj01, subj02, subj05, subj07
 - Download annotation of COCO from [link](http://images.cocodataset.org/annotations/annotations_trainval2017.zip), unzip it and then place the whole folder `annotations` under `dataset/NSD/nsddata_stimuli/stimuli/nsd`
 - [NSD Data Manual](https://cvnlab.slite.page/p/CT9Fwl4_hc/NSD-Data-Manual)
+subj 01, 02, 05, 07
 
-5. [LAVIS of Salesforce](https://github.com/salesforce/LAVIS)
+6. [LAVIS of Salesforce](https://github.com/salesforce/LAVIS)
 The code has been changed for this project.
 
-run ``  for subj 01, 02, 05, 07
+7. [SAM2](https://github.com/facebookresearch/segment-anything-2.git)
+Download [sam2_hiera_tiny.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_tiny.pt), [sam2_hiera_small.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_small.pt), [sam2_hiera_base_plus.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_base_plus.pt) and [sam2_hiera_large.pt](https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.pt), put them under `../large_files_for_BraVO/SAM2`
+
 
 **Step 2:**
 ``` shell
@@ -111,3 +119,36 @@ sbatch -p gpu_4090 --gpus=1 step3_run.sh # N40R4
 conda deactivate
 conda env remove -n BraVO
 ```
+
+
+tar -czvf 05.tar.gz timeseries_session05* && rm -rf timeseries_session05*
+tar -czvf 06.tar.gz timeseries_session06* && rm -rf timeseries_session06*
+tar -czvf 07.tar.gz timeseries_session07* && rm -rf timeseries_session07*
+tar -czvf 08.tar.gz timeseries_session08* && rm -rf timeseries_session08*
+tar -czvf 09.tar.gz timeseries_session09* && rm -rf timeseries_session09*
+
+tar -czvf 10.tar.gz timeseries_session10* && rm -rf timeseries_session10*
+tar -czvf 11.tar.gz timeseries_session11* && rm -rf timeseries_session11*
+tar -czvf 12.tar.gz timeseries_session12* && rm -rf timeseries_session12*
+tar -czvf 13.tar.gz timeseries_session13* && rm -rf timeseries_session13*
+tar -czvf 14.tar.gz timeseries_session14* && rm -rf timeseries_session14*
+tar -czvf 15.tar.gz timeseries_session15* && rm -rf timeseries_session15*
+tar -czvf 16.tar.gz timeseries_session16* && rm -rf timeseries_session16*
+tar -czvf 17.tar.gz timeseries_session17* && rm -rf timeseries_session17*
+tar -czvf 18.tar.gz timeseries_session18* && rm -rf timeseries_session18*
+tar -czvf 19.tar.gz timeseries_session19* && rm -rf timeseries_session19*
+
+tar -czvf 20.tar.gz timeseries_session20* && rm -rf timeseries_session20*
+tar -czvf 21.tar.gz timeseries_session21* && rm -rf timeseries_session21*
+tar -czvf 22.tar.gz timeseries_session22* && rm -rf timeseries_session22*
+tar -czvf 23.tar.gz timeseries_session23* && rm -rf timeseries_session23*
+tar -czvf 24.tar.gz timeseries_session24* && rm -rf timeseries_session24*
+tar -czvf 25.tar.gz timeseries_session25* && rm -rf timeseries_session25*
+tar -czvf 26.tar.gz timeseries_session26* && rm -rf timeseries_session26*
+tar -czvf 27.tar.gz timeseries_session27* && rm -rf timeseries_session27*
+tar -czvf 28.tar.gz timeseries_session28* && rm -rf timeseries_session28*
+tar -czvf 29.tar.gz timeseries_session29* && rm -rf timeseries_session29*
+
+tar -czvf 30.tar.gz timeseries_session30* && rm -rf timeseries_session30*
+tar -czvf 31.tar.gz timeseries_session31* && rm -rf timeseries_session31*
+tar -czvf 32.tar.gz timeseries_session32* && rm -rf timeseries_session32*

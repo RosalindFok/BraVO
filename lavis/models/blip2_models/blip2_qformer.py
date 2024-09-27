@@ -460,6 +460,7 @@ class Blip2Qformer(Blip2Base):
 
         elif mode == "multimodal":
             # return multimodel query features
+            # Image, noted by BraVO
             with self.maybe_autocast():
                 image_embeds_frozen = self.ln_vision(self.visual_encoder(image))
             image_embeds_frozen = image_embeds_frozen.float()
@@ -469,16 +470,20 @@ class Blip2Qformer(Blip2Base):
             query_tokens = self.query_tokens.expand(
                 image_embeds_frozen.shape[0], -1, -1
             )
-            query_atts = torch.ones(query_tokens.size()[:-1], dtype=torch.long).to(
-                self.device
-            )
 
+            # Text, noted by BraVO
             text = self.tokenizer(caption, return_tensors="pt", padding=True).to(
                 self.device
             )
-            attention_mask = torch.cat([query_atts, text.attention_mask], dim=1)
 
-            output = self.Qformer.bert(
+            # Attention mask, noted by BraVO
+            query_atts = torch.ones(query_tokens.size()[:-1], dtype=torch.long).to(
+                self.device
+            )
+            attention_mask = torch.cat([query_atts, text.attention_mask], dim=1) # all 1, note by BraVO
+            
+            # Multimodal, noted by BraVO
+            output = self.Qformer.bert( # blip2_models.Qfomer.BertModel
                 text.input_ids,
                 query_embeds=query_tokens,
                 attention_mask=attention_mask,
@@ -486,7 +491,8 @@ class Blip2Qformer(Blip2Base):
                 encoder_attention_mask=image_atts,
                 return_dict=True,
             )
-
+            # output.last_hidden_state.shape = ([1, 20, 768])
+            # query_tokens.size(1) = 16
             multimodal_embeds = output.last_hidden_state[:, : query_tokens.size(1), :]
 
         return BlipOutputFeatures(

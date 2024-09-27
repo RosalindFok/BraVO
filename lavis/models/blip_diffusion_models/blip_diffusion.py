@@ -993,10 +993,10 @@ class BlipDiffusion(BaseModel):
     def forward_ctx_embeddings(self, input_image, text_input, ratio=None):
         def compute_ctx_embeddings(input_image, text_input):
             # blip_embeddings = self.blip(image=input_image, text=text_input)
-            blip_embeddings = self.blip.extract_features(
+            blip_embeddings = self.blip.extract_features( # blip2_models.blip2_qformer.Blip2Qformer.extract_features
                 {"image": input_image, "text_input": text_input}, mode="multimodal"
-            ).multimodal_embeds
-            ctx_embeddings = self.proj_layer(blip_embeddings)
+            ).multimodal_embeds # blip_embeddings.shape = ([1, 16, 768])
+            ctx_embeddings = self.proj_layer(blip_embeddings) # ctx_embeddings.shape = ([1, 16, 768])
             return ctx_embeddings
 
         if isinstance(text_input, str):

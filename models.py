@@ -1,5 +1,6 @@
 import time
 import torch  
+import platform
 import torch.nn as nn  
 
 __all__ = [
@@ -11,6 +12,8 @@ __all__ = [
 ########################
 ###### Set divece ######
 ########################
+
+num_workers = 6 if platform.system() == 'Linux' else 0
 
 def _setup_device_() -> list[torch.device]:
     """
@@ -70,9 +73,20 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
                 is_eval=True,
                 device=device 
             )
+    elif mode == 'caption':
+        model, vis_processors, txt_processors = load_model_and_preprocess(
+                name='blip2_t5', # blip2_models.blip2_t5.Blip2T5
+                model_type='caption_coco_flant5xl', # pretrain_flant5xl, caption_coco_flant5xl, pretrain_flant5xxl
+                is_eval=True, 
+                device=device
+            )
     else:
-        raise ValueError(f"Invalid mode: {mode}.")  
+        raise ValueError(f'Invalid mode: {mode}.')  
     
+    # Multi-GPUs
+    if devices_num > 1:
+        model = nn.DataParallel(model)
+    model = model.module if hasattr(model, 'module') else model
     end_time = time.time()
     print(f'It took {end_time - start_time:.2f} seconds to load the BLIP-2 model {mode}.')
     return model, vis_processors, txt_processors
@@ -83,26 +97,26 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
 ######Brain Decoder#####
 ######################## 
 class Conv_Twice(nn.Module):
-    def __init__(self, in_channels : int, out_channels : int) -> None:
+    def __init__(self, in_channels : int, out_channels : int, kernel_size : int = 3) -> None:
         super().__init__()
         self.convs = nn.Sequential(
-            nn.Conv1d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1),
+            nn.Conv1d(in_channels=in_channels , out_channels=out_channels, kernel_size=kernel_size, padding=(kernel_size - 1)//2), # stride = 1
             nn.BatchNorm1d(out_channels),
-            nn.Tanh(),
-            nn.Conv1d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1),
+            nn.Hardtanh(min_val=-3, max_val=3),
+            nn.Conv1d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, padding=(kernel_size - 1)//2), # stride = 1
             nn.BatchNorm1d(out_channels),
-            nn.Tanh()
+            nn.Hardtanh(min_val=-3, max_val=3)
         )
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         x = self.convs(x)
         return x
     
 class Down(nn.Module):
-    def __init__(self, in_channels : int, out_channels : int) -> None:
+    def __init__(self, in_channels : int, out_channels : int, kernel_size : int = 3) -> None:
         super().__init__()
         self.down_sample = nn.Sequential(
             nn.MaxPool1d(2),
-            Conv_Twice(in_channels=in_channels, out_channels=out_channels)
+            Conv_Twice(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size)
         )
 
     def forward(self, x : torch.Tensor) -> torch.Tensor:
@@ -110,10 +124,10 @@ class Down(nn.Module):
         return x
 
 class Up(nn.Module):
-    def __init__(self, in_channels : int, out_channels : int) -> None:
+    def __init__(self, in_channels : int, out_channels : int, kernel_size : int = 3) -> None:
         super().__init__()
         self.up_sample = nn.ConvTranspose1d(in_channels=in_channels, out_channels=in_channels//2, kernel_size=2, stride=2)
-        self.convs =  Conv_Twice(in_channels=in_channels, out_channels=out_channels)
+        self.convs =  Conv_Twice(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size)
         
     def forward(self, x1 : torch.Tensor, x2 : torch.Tensor) -> torch.Tensor:
         x1 = self.up_sample(x1)
@@ -127,20 +141,19 @@ class Caption_Decoder(nn.Module):
     """
     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
         super().__init__()
-        assert input_shape == output_shape, f'input_shape={input_shape} != output_shape={output_shape}.'
-        self.input_layer = nn.Conv1d(in_channels=input_shape[0], out_channels=64, kernel_size=3, padding=1)
-        self.input_bn = nn.BatchNorm1d(64) 
-        self.dw1 = Down(in_channels=64, out_channels=128)
-        self.dw2 = Down(in_channels=128, out_channels=256)
-        self.dw3 = Down(in_channels=256, out_channels=512)
-        self.dw4 = Down(in_channels=512, out_channels=1024)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=1024, nhead=8, dim_feedforward=2048, batch_first=True)  
+        self.input_layer = nn.Conv1d(in_channels=input_shape[0], out_channels=128, kernel_size=3, padding=1)
+        self.input_bn = nn.BatchNorm1d(128) 
+        self.dw1 = Down(in_channels=128, out_channels=256)
+        self.dw2 = Down(in_channels=256, out_channels=512)
+        self.dw3 = Down(in_channels=512, out_channels=1024)
+        self.dw4 = Down(in_channels=1024, out_channels=2048)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=2048, nhead=8, dim_feedforward=4096, batch_first=True)  
         self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=6)
-        self.up1 = Up(in_channels=1024, out_channels=512)
-        self.up2 = Up(in_channels=512, out_channels=256)
-        self.up3 = Up(in_channels=256, out_channels=128)
-        self.up4 = Up(in_channels=128, out_channels=64)
-        self.output_layer = nn.Conv1d(in_channels=64, out_channels=output_shape[0], kernel_size=1, padding=0)
+        self.up1 = Up(in_channels=2048, out_channels=1024)
+        self.up2 = Up(in_channels=1024, out_channels=512)
+        self.up3 = Up(in_channels=512, out_channels=256)
+        self.up4 = Up(in_channels=256, out_channels=128)
+        self.output_layer = nn.Conv1d(in_channels=128, out_channels=output_shape[0], kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  
         # Encoder
@@ -172,44 +185,55 @@ class Image_Decoder(nn.Module):
     """
     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
         super().__init__()
-        assert input_shape == output_shape, f'input_shape={input_shape} != output_shape={output_shape}.'
         self.input_layer = nn.Conv1d(in_channels=input_shape[0], out_channels=32, kernel_size=3, padding=1)
         self.input_bn = nn.BatchNorm1d(32) 
-        self.dw1 = Down(in_channels=32, out_channels=64)
-        self.dw2 = Down(in_channels=64, out_channels=128)
-        self.dw3 = Down(in_channels=128, out_channels=256)
-        self.dw4 = Down(in_channels=256, out_channels=512)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, dim_feedforward=1024, batch_first=True)  
+        self.dw1 = Down(in_channels=32 , out_channels=64 , kernel_size=3)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.dw2 = Down(in_channels=64 , out_channels=128 , kernel_size=3)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.dw3 = Down(in_channels=128 , out_channels=256, kernel_size=3)
+        self.bn3 = nn.BatchNorm1d(256)
+        self.dw4 = Down(in_channels=256, out_channels=512, kernel_size=3)
+        self.bn4 = nn.BatchNorm1d(512)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=output_shape[0], dim_feedforward=1024, batch_first=True)  
         self.bottleneck = nn.TransformerEncoder(encoder_layer, num_layers=6)
-        self.up1 = Up(in_channels=512, out_channels=256)
-        self.up2 = Up(in_channels=256, out_channels=128)
-        self.up3 = Up(in_channels=128, out_channels=64)
-        self.up4 = Up(in_channels=64, out_channels=32)
-        # self.output_layer = nn.Conv1d(in_channels=32, out_channels=output_shape[0], kernel_size=1, padding=0)
-        self.output_layer = nn.Linear(in_features=32*input_shape[1], out_features=output_shape[0]*output_shape[1])
+        self.up1 = Up(in_channels=512, out_channels=256, kernel_size=3)
+        self.up2 = Up(in_channels=256, out_channels=128, kernel_size=3)
+        self.up3 = Up(in_channels=128, out_channels=64 , kernel_size=3)
+        self.up4 = Up(in_channels=64 , out_channels=32 , kernel_size=3)
+        self.output_layer = nn.Sequential(
+            nn.Conv1d(in_channels=32, out_channels=output_shape[0], kernel_size=1, padding=0),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:  
         # Encoder
-        x1 = self.input_bn(self.input_layer(x))
+        x1 = self.input_layer(x)
         x2 = self.dw1(x1)
+        x2 = self.bn1(x2)
         x3 = self.dw2(x2)
+        x3 = self.bn2(x3)
         x4 = self.dw3(x3)
+        x4 = self.bn3(x4)
         x5 = self.dw4(x4)
+        x5 = self.bn4(x5)
 
         # Bottleneck
         x5 = x5.permute(0, 2, 1) # (N, C, L) ->(N, L, C) 
         x5 = self.bottleneck(x5)
         x5 = x5.permute(0, 2, 1) # (N, L, C) ->(N, C, L)
+        x5 = self.bn4(x5)
 
         # Decoder
         y4 = self.up1(x5, x4)
+        y4 = self.bn3(y4)
         y3 = self.up2(y4, x3)
+        y3 = self.bn2(y3)
         y2 = self.up3(y3, x2)
+        y2 = self.bn1(y2)
         y1 = self.up4(y2, x1)
+        y1 = self.input_bn(y1)
 
         # Output
-        y1 = y1.view(y1.size(0), -1)
         y = self.output_layer(y1)
-        y = y.view(y.size(0), x.size(1), x.size(2))
 
         return y

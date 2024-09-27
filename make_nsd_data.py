@@ -1,18 +1,44 @@
 import os
 import h5py
 import time
+import torch
 import shutil
 import scipy.io
+# import warnings  
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from PIL import Image
+from torch.utils.data import Dataset, DataLoader
+from collections import Counter, defaultdict, namedtuple
 from lavis.models.blip_diffusion_models.utils import preprocess_canny
+# from SAM2.sam2.build_sam import build_sam2
+# from SAM2.sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
 from config import configs_dict
-from models import device, load_blip_models
-from utils import NSD_dir_path, NSD_saved_dir_path
+from models import device, num_workers, load_blip_models
+from utils import NSD_dir_path, NSD_saved_dir_path, sam2_ckpt_dir_path
 from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs
+
+os.environ['TOKENIZERS_PARALLELISM'] = 'false' 
+
+DataPoint = namedtuple('DataPoint', ['index', 'image'])
+class Dataset_for_BLIPs(Dataset):
+    def __init__(self, path_dict : dict[int : dict[str : str]], vis_processors) -> None:
+        super().__init__()
+        self.path_dict = path_dict
+        self.vis_processors = vis_processors
+
+    def __getitem__(self, index) -> tuple[int, torch.Tensor]:
+        image = Image.open(self.path_dict[index]['image'])
+        image = self.vis_processors(image)
+        image = torch.tensor(np.array(image))
+        return DataPoint(index, image)
+
+    def __len__(self) -> int:
+        return len(self.path_dict)
+                 
+
 
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
@@ -50,9 +76,10 @@ class NSD_DATA():
         self.coco_annotation_dir_path = join_paths(NSD_dir_path, 'nsddata_stimuli', 'stimuli', 'nsd', 'annotations')
 
         ## saved path of this subject
-        self.subject_saved_dir_path = join_paths(NSD_saved_dir_path, self.subj+'_pairs')
+        self.subject_saved_dir_path = join_paths(NSD_saved_dir_path, self.subj)
         check_and_make_dirs(self.subject_saved_dir_path)
 
+    
     def read_behav_responses_tsv(self) -> pd.core.frame.DataFrame:
         start_time = time.time()
         data_frame = pd.read_csv(self.behav_responses_tsv_file_path, sep='\t', encoding='utf-8')
@@ -145,6 +172,7 @@ class NSD_DATA():
         val_annotations = __extract_captions__(captions_val_annotations)
         # captions_dict is {key=id : value=[caption1, caption2, ...]}
         captions_dict = merge_dicts_if_no_conflict(train_annotations, val_annotations) 
+        del captions_train2017, captions_val2017, captions_train_annotations, captions_val_annotations, train_annotations, val_annotations
 
         # categories
         instances_train2017 = read_json_file(path=join_paths(self.coco_annotation_dir_path, 'instances_train2017.json'))
@@ -157,6 +185,7 @@ class NSD_DATA():
         val_categories = __extract_categories__(annotations_val2017, categories_val2017)
         # categories_dict is {key=id : value={supercategory, name}}
         categories_dict = merge_dicts_if_no_conflict(train_categories, val_categories)
+        del instances_train2017, instances_val2017, annotations_train2017, annotations_val2017, categories_train2017, categories_val2017, train_categories, val_categories
         
         end_time = time.time()
         print(f'It took {end_time - start_time:.2f} seconds to read {self.coco_annotation_dir_path}.')
@@ -269,10 +298,16 @@ class NSD_DATA():
         end_time = time.time()
         print(f'It took {end_time - start_time:.2f} seconds to get ROIs to {saved_rois_path}.')
 
-    def make_pairs(self) -> None:
+    def make_pairs(self) -> dict[str : dict[int : dict[str : str]]]:
         """
         fMRI <--> image + text
         """        
+        ## Path of recorded processed data paths
+        processed_data_paths_json_path = join_paths(self.subject_saved_dir_path, 'processed_data_paths.json')
+        if os.path.exists(processed_data_paths_json_path):
+            path_dict = read_json_file(path=processed_data_paths_json_path)
+            return path_dict
+
         ## behav_responses_tsv
         responses = self.read_behav_responses_tsv()
         first_row = responses.iloc[0]
@@ -299,15 +334,6 @@ class NSD_DATA():
 
         ## ROIs
         self.read_ROIs()
-
-        ## Load blip2 model
-        blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode='diffusion')
-
-        ## save_uncond_embedding
-        uncond_embedding = blip_diffusion_model.generate_uncond_embedding(neg_prompt=configs_dict['blip_diffusion']['negative_prompt'])
-        uncond_embedding = uncond_embedding.cpu().numpy()
-        np.save(join_paths(self.subject_saved_dir_path, 'uncond_embedding.npy'), uncond_embedding)
-        assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} is not (1, 77, 768).'
         
         ## Paths of train set and test set
         train_saved_dir_path = join_paths(self.subject_saved_dir_path, 'train')
@@ -315,11 +341,12 @@ class NSD_DATA():
         check_and_make_dirs(train_saved_dir_path)
         check_and_make_dirs(test_saved_dir_path)
 
+        # Subj01, 02, 05, 07. Each subject has 40 sessions, each session has 750 trials.
+        path_dict = {'train' : [], 'test' : []} 
         for session_id in responses['SESSION'].unique():
             response = responses[responses['SESSION'] == session_id].to_numpy()
             nii_data = self.read_betas(session_id=session_id)
             assert len(response) == len(nii_data), f'Number of responses and betas are not equal in session {session_id}.'
-            
             for trial, fmri in tqdm(zip(response, nii_data), total=len(nii_data), desc=f'Processing {self.subj} session {session_id}', leave=True):
                 # correct trial
                 if trial[column_of_ISCORRECT] == 1:
@@ -327,107 +354,214 @@ class NSD_DATA():
                     trial_id = int(trial[column_of_TRIAL])
                     session_run_trial_string = f'session{str(session_id).zfill(2)}_run{str(run_id).zfill(2)}_trial{str(trial_id).zfill(2)}'
                     KID_73 = int(trial[column_of_73KID]) - 1 # 0-based index
+                    image_array = imgBrick[KID_73].astype(np.uint8) # numpy.ndarray, shape=(425, 425, 3)
+
                     # Note: Split data into train and test sets based on whether the 73KID is part of the shared indices.
                     # Train Set
                     if not KID_73 in sharedixs:
                         saved_path = join_paths(train_saved_dir_path, session_run_trial_string)
+                        path_dict['train'].append(saved_path)
                     # Test Set
                     else:
                         saved_path = join_paths(test_saved_dir_path, session_run_trial_string)
+                        path_dict['test'].append(saved_path)
                     check_and_make_dirs(saved_path)
                     
-                    if len(os.listdir(saved_path)) == len(['canny', 'fmri', 'image', 'strings', 'hidden_states', 'causal_attention_mask']): 
-                        continue
-                    elif len(os.listdir(saved_path)) > 5:
-                        print(f'Check files in {saved_path}')
-                        exit(1)
-
                     # fMRI
-                    save_nii_file(fmri, join_paths(saved_path, 'fmri.nii.gz'))
+                    fmri_path = join_paths(saved_path, 'fmri.nii.gz')
+                    if not os.path.exists(fmri_path):
+                        save_nii_file(fmri, fmri_path)
 
-                    # image: BLIP-2 encodes via RGB
-                    image = Image.fromarray(imgBrick[KID_73])
-                    image.save(join_paths(saved_path, 'image.png'))
+                    # image
+                    image_path = join_paths(saved_path, 'image.png')
+                    if not os.path.exists(image_path):
+                        image_rgb = Image.fromarray(image_array).convert('RGB')
+                        image_rgb.save(image_path)
 
                     # canny
-                    canny_image = preprocess_canny(input_image=imgBrick[KID_73].astype(np.uint8), 
-                                                   image_resolution=imgBrick[KID_73].shape[0], 
-                                                   low_threshold=100, high_threshold=200
-                                                )
-                    canny = np.array(canny_image)
-                    if not np.max(canny) > np.min(canny):
-                        canny_image = preprocess_canny(input_image=imgBrick[KID_73].astype(np.uint8), 
-                                                       image_resolution=imgBrick[KID_73].shape[0], 
-                                                       low_threshold=np.min(canny)//2, high_threshold=np.max(canny)//2
+                    canny_path = join_paths(saved_path, 'canny.png')
+                    if not os.path.exists(canny_path):
+                        canny_image = preprocess_canny(input_image=image_array, image_resolution=image_array.shape[0], 
+                                                       low_threshold=100, high_threshold=200
                                                     )
-                    canny = np.array(canny_image)
-                    assert np.max(canny) > np.min(canny), f'Canny image is all black in path={saved_path}!'
-                    canny_image.save(join_paths(saved_path, 'canny.png'))
+                        canny = np.array(canny_image)
+                        if not np.max(canny) > np.min(canny):
+                            canny_image = preprocess_canny(input_image=image_array, image_resolution=image_array.shape[0], 
+                                                           low_threshold=np.min(canny)//2, high_threshold=np.max(canny)//2
+                                                        )
+                        canny = np.array(canny_image)
+                        assert np.max(canny) > np.min(canny), f'Canny image is all black in path={saved_path}!'
+                        canny_image.save(canny_path)
 
-                    # old_flag, captions and categories
-                    OLD_flag = int(trial[column_of_ISOLD]) # 0 was novel, 1 was old
-                    captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
-                    category_list = categories_dict[stim_info[KID_73]] # list[dict[str, any]], [{'supercategory', 'name', 'area}]
-                    
-                    # Add image and caption to sample
-                    sample = {}
-                    sample['cond_images'] = bd_vis_processors['eval'](image).unsqueeze(0).to(device)
-                    sample['prompt'] = captions_list
-                    # Select the category with the biggest area
-                    area_of_each_category = {}
-                    for category in category_list:
-                        name = category['name']
-                        area = category['area']
-                        if name in area_of_each_category:
-                            area_of_each_category[name] += area
-                        else:
-                            area_of_each_category[name] = area
-                    max_key = max(area_of_each_category, key=lambda k: area_of_each_category[k])
-                    max_key_processed = [bd_txt_processors['eval'](max_key)]
-                    sample['cond_subject'] = max_key_processed
-                    sample['tgt_subject']  = max_key_processed
-
-                    # Extract the embedding and save it as a npy file
-                    hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
-                    assert hidden_states.shape == (1, 77, 768), f'In {saved_path}, embedding shape is {hidden_states.shape}, not (1, 77, 768).'
-                    assert causal_attention_mask.shape == (1, 1, 77, 77), f'In {saved_path}, causal_attention_mask shape is {causal_attention_mask.shape}, not (1, 1, 77, 77).'
-                    hidden_states = hidden_states.cpu().numpy()
-                    causal_attention_mask = causal_attention_mask.cpu().numpy()
-                    np.save(join_paths(saved_path, 'hidden_states.npy'), hidden_states)
-                    np.save(join_paths(saved_path, 'causal_attention_mask.npy'), causal_attention_mask)
-                    
-                    # Save the strings to json file
-                    json_data = {
-                        'isold' : 'novel' if OLD_flag == 0 else 'old', # str
-                        'captions_list' : captions_list, # list[str]
-                        'selected_category' : max_key, # str
-                        'instances_category' : category_list, #  list[dict[str, any]]
-                    }
-                    write_json_file(path = join_paths(saved_path, 'strings.json'), data = json_data)
+                    # strings
+                    strings_path = join_paths(saved_path, 'strings.json')
+                    if not os.path.exists(strings_path):
+                        # captions and categories from COCO annotation
+                        captions_list = captions_dict[stim_info[KID_73]] # list[str], each image has several captions
+                        category_list = categories_dict[stim_info[KID_73]] # list[dict[str, any]], [{'supercategory', 'name', 'area}]
+                        # string: describe the number of each category in the image
+                        element_counts = Counter([category['name'] for category in category_list])
+                        category_string = 'There are ' + ', '.join(f'{count} {element}' for element, count in element_counts.items()) + ' in this image.'
+                        # select the category with the biggest area in sum
+                        area_of_each_category = defaultdict(float) 
+                        for category in category_list:
+                            area_of_each_category[category['name']] += category['area']  
+                        subject = max(area_of_each_category, key=lambda k: area_of_each_category[k])
+                        # save the strings to json file
+                        json_data = {
+                            'coco_captions' : captions_list, # list[str]
+                            'coco_category' : category_list, # list[dict[str, any]]
+                            'selected_category' : subject,   # str
+                        }
+                        write_json_file(path=strings_path, data=json_data)
                 
                 # incorrect trial
                 else:
                     continue
         
-        # check if all causal_attention_mask are the same
-        causal_attention_mask_paths_list = []
-        get_all_dirs = lambda path: [join_paths(path, x) for x in os.listdir(path)]
-        for dir_path in get_all_dirs(train_saved_dir_path)+get_all_dirs(test_saved_dir_path):
-            for files in os.listdir(dir_path):
-                if files == 'causal_attention_mask.npy':
-                    causal_attention_mask_paths_list.append(join_paths(dir_path, files))
-        assert len(causal_attention_mask_paths_list) > 0, f'No causal_attention_mask found in {train_saved_dir_path} and {test_saved_dir_path}.'
-        reference_array = np.load(causal_attention_mask_paths_list[0], allow_pickle=True)
-        for file_path in tqdm(causal_attention_mask_paths_list[1:], desc='Checking causal_attention_mask', leave=True):
-            current_array = np.load(file_path, allow_pickle=True) 
-            assert np.array_equal(reference_array, current_array), f'In {file_path}, causal_attention_mask is not equal to the reference array.'
-        np.save(join_paths(self.subject_saved_dir_path, 'causal_attention_mask.npy'), reference_array)
-        for file_path in causal_attention_mask_paths_list:
-            os.remove(file_path)
-
+        # Reorganize the path_dict
+        for key, item in path_dict.items():
+            files_dict = {} # {index : {keyword : path}}
+            for index, trail_dir_path in enumerate(item):
+                files = os.listdir(trail_dir_path)
+                files_dict[index] = {file.split('.')[0] : join_paths(trail_dir_path, file) for file in files}
+            path_dict[key] = files_dict
+        write_json_file(path=processed_data_paths_json_path, data=path_dict)
+        # Check if the number of samples in json file is equal to the number of directory
+        path_dict = read_json_file(path=processed_data_paths_json_path)
+        assert len(path_dict['train']) == len(os.listdir(train_saved_dir_path)), f"Number of train samples in json={len(path_dict['train'])} is not equal to the number of directory={len(os.listdir(train_saved_dir_path))}."
+        assert len(path_dict['test']) == len(os.listdir(test_saved_dir_path)), f"Number of test samples in json={len(path_dict['test'])} is not equal to the number of directory={len(os.listdir(test_saved_dir_path))}."
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
+        return path_dict
+
+    def blip2_process(self, path_dict : dict[str : dict[str : dict[str : str]]]) -> None:
+        # Save the results processed by BLIPs
+        blips_output_dir_path = join_paths(self.subject_saved_dir_path, 'blips_output')
+        check_and_make_dirs(blips_output_dir_path)
+
+        # Convert the keys of path_dict from str to int
+        path_dict = {key: {int(k) : v for k, v in value.items()} for key, value in path_dict.items()}  
+        num_train, num_test = len(path_dict['train']), len(path_dict['test'])
+        
+        ## Generate captions for each image
+        blip2t5_generated_captions_of_train_set_path = join_paths(blips_output_dir_path, 'blip2t5_generated_captions_of_train_set.json')
+        blip2t5_generated_captions_of_test_set_path  = join_paths(blips_output_dir_path, 'blip2t5_generated_captions_of_test_set.json')
+        need_caption_train = (  
+            os.path.exists(blip2t5_generated_captions_of_train_set_path) and  
+            len(read_json_file(blip2t5_generated_captions_of_train_set_path)) == num_train  
+        )
+        need_caption_test = (  
+            os.path.exists(blip2t5_generated_captions_of_test_set_path) and  
+            len(read_json_file(blip2t5_generated_captions_of_test_set_path)) == num_test  
+        )
+
+        if not (need_caption_train and need_caption_test):
+            # Load blip2 model
+            blip2t5_model, blip2t5_vis_processors, _ = load_blip_models(mode='caption') 
+
+            batch_size = 12
+            prompt = 'Please provide a detailed description of this image, including all visible elements such as objects, people, settings, actions, colors, and emotions, and please do not generate repetitive statements.'
+            dataset_queue, tag_queue, saved_path_queue, number_queue = [], [], [], []
+            if not need_caption_test:
+                dataset_queue.append(Dataset_for_BLIPs(path_dict=path_dict['test'],  vis_processors=blip2t5_vis_processors['eval']))
+                tag_queue.append('Test')
+                saved_path_queue.append(blip2t5_generated_captions_of_test_set_path)
+                number_queue.append(num_test)
+            if not need_caption_train:
+                dataset_queue.append(Dataset_for_BLIPs(path_dict=path_dict['train'], vis_processors=blip2t5_vis_processors['eval']))
+                tag_queue.append('Train')
+                saved_path_queue.append(blip2t5_generated_captions_of_train_set_path)
+                number_queue.append(num_train)
+            captions_set = {} # {index : caption}
+            for dataset, tag, saved_path, number in zip(dataset_queue, tag_queue, saved_path_queue, number_queue):
+                dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+                for batches in tqdm(dataloader, desc=f'{tag} set', leave=True):
+                    indices = batches.index.to('cpu').numpy()
+                    images = batches.image.to(device) # torch.Size([batch_size, 425, 425, 3])
+                    output_text = blip2t5_model.generate({'image' : images, 'prompt' : prompt},
+                                                          max_length=100, min_length=30)
+                    for index, text in zip(indices, output_text):
+                        index = int(index)
+                        captions_set[index] = text
+                assert len(captions_set) == number, f'The length of generated captions of {tag.lower()} set is {len(captions_set)}, which should be {number}.'
+                write_json_file(path=saved_path, data=captions_set)
+
+            # Delete the loaded model
+            del blip2t5_model, blip2t5_vis_processors
+        
+        ## Generate embedding for each pair
+        blipdiffusion_generated_embeddings_of_train_set_path = join_paths(blips_output_dir_path, 'blipdiffusion_generated_embeddings_of_train.hdf5')
+        blipdiffusion_generated_embeddings_of_test_set_path  = join_paths(blips_output_dir_path, 'blipdiffusion_generated_embeddings_of_test.hdf5')
+        need_embedding_train = (  
+            os.path.exists(blipdiffusion_generated_embeddings_of_train_set_path) and  
+            len(h5py.File(blipdiffusion_generated_embeddings_of_train_set_path, 'r').keys()) == num_train  
+        )
+        need_embedding_test = (  
+            os.path.exists(blipdiffusion_generated_embeddings_of_test_set_path) and  
+            len(h5py.File(blipdiffusion_generated_embeddings_of_test_set_path, 'r').keys()) == num_test  
+        )
+
+        # # Load blip2 model
+        # blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode='diffusion')
+        # # save_uncond_embedding
+        # uncond_embedding = blip_diffusion_model.generate_uncond_embedding(neg_prompt=configs_dict['blip_diffusion']['negative_prompt'])
+        # uncond_embedding = uncond_embedding.cpu().numpy()
+        # np.save(join_paths(blips_output_dir_path, 'uncond_embedding.npy'), uncond_embedding)
+        # assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} is not (1, 77, 768).'
+      
+        
+        # # output_text = blip2t5_model.generate({'image' : blip2t5_vis_processors['eval'](image_rgb).unsqueeze(0).to(device),
+        # #                                       'prompt' : prompt},
+        # #                                     max_length=300, min_length=20,
+        # #                                 )[0]
+        # caption = [category_count_string, output_text]
+        # # Add image and caption to sample
+        # sample = {}
+        # sample['cond_images'] = bd_vis_processors['eval'](image_rgb).unsqueeze(0).to(device)
+        # sample['prompt'] = caption
+                    
+        # subject = [bd_txt_processors['eval'](subject)]
+        # sample['cond_subject'] = subject
+        # sample['tgt_subject']  = subject
+
+        # # Extract the embedding and save it as a npy file
+        # hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
+        # assert hidden_states.shape == (1, 77, 768), f'In {saved_path}, embedding shape is {hidden_states.shape}, not (1, 77, 768).'
+        # assert causal_attention_mask.shape == (1, 1, 77, 77), f'In {saved_path}, causal_attention_mask shape is {causal_attention_mask.shape}, not (1, 1, 77, 77).'
+        # hidden_states = hidden_states.cpu().numpy()
+        # causal_attention_mask = causal_attention_mask.cpu().numpy()
+        # np.save(join_paths(saved_path, 'hidden_states.npy'), hidden_states)
+        # np.save(join_paths(saved_path, 'causal_attention_mask.npy'), causal_attention_mask)
+
+
+        # # check if all causal_attention_mask are the same
+        # causal_attention_mask_paths_list = []
+        # get_all_dirs = lambda path: [join_paths(path, x) for x in os.listdir(path)]
+        # for dir_path in get_all_dirs(train_saved_dir_path)+get_all_dirs(test_saved_dir_path):
+        #     for files in os.listdir(dir_path):
+        #         if files == 'causal_attention_mask.npy':
+        #             causal_attention_mask_paths_list.append(join_paths(dir_path, files))
+        # assert len(causal_attention_mask_paths_list) > 0, f'No causal_attention_mask found in {train_saved_dir_path} and {test_saved_dir_path}.'
+        # reference_array = np.load(causal_attention_mask_paths_list[0], allow_pickle=True)
+        # for file_path in tqdm(causal_attention_mask_paths_list[1:], desc='Checking causal_attention_mask', leave=True):
+        #     current_array = np.load(file_path, allow_pickle=True) 
+        #     assert np.array_equal(reference_array, current_array), f'In {file_path}, causal_attention_mask is not equal to the reference array.'
+        # np.save(join_paths(self.subject_saved_dir_path, 'causal_attention_mask.npy'), reference_array)
+        # for file_path in causal_attention_mask_paths_list:
+        #     os.remove(file_path)
+
+        # ## Load SAM2 model
+        # checkpoint = join_paths(sam2_ckpt_dir_path, 'sam2_hiera_large.pt')
+        # sam2 = build_sam2('sam2_hiera_l.yaml', checkpoint, device=device, apply_postprocessing=False)
+        # mask_generator = SAM2AutomaticMaskGenerator(model=sam2, points_per_side=64, points_per_batch=128,
+        #                                             pred_iou_thresh=0.7, stability_score_thresh=0.92,
+        #                                             stability_score_offset=0.7, crop_n_layers=1,
+        #                                             box_nms_thresh=0.7, crop_n_points_downscale_factor=2,
+        #                                             min_mask_region_area=25.0, use_m2m=True
+        #                                         )
 
 # make pairs of NSD
 if __name__ == '__main__':
     nsd_data = NSD_DATA(subj_id=configs_dict['subj_id'])
-    nsd_data.make_pairs()
+    path_dict = nsd_data.make_pairs()
+    nsd_data.blip2_process(path_dict=path_dict)

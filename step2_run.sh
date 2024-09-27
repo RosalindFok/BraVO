@@ -11,7 +11,7 @@ STATE_FILE="state_${BATCH_JOB_ID}.log"
 
 # Execute the example script
 python main.py --task t --tower_name caption
-python main.py --task t --tower_name image
+# python main.py --task t --tower_name image
 
 # Stop the GPU collection process
 echo "over" >> "${STATE_FILE}"

@@ -21,7 +21,8 @@ model:
   num_query_token: 32
 
   # T5
-  t5_model: "google/flan-t5-xl"
+  # t5_model: "google/flan-t5-xl"
+  t5_model: "../large_files_for_BraVO/flan-t5-xl"
 
   # generation configs
   prompt: "a photo of"

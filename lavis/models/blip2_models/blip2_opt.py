@@ -337,7 +337,7 @@ class Blip2OPT(Blip2Base):
             outputs = self.opt_model.generate(
                 inputs_embeds=inputs_embeds,
                 attention_mask=attention_mask,
-                do_sample=False,
+                do_sample=True,
                 num_beams=num_beams,
                 max_new_tokens=max_len,
                 min_length=min_len,

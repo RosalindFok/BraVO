@@ -10,7 +10,7 @@ from collections import namedtuple
 from torch.utils.data import Dataset
 
 from models import device, load_blip_models
-from utils import join_paths, read_nii_file, check_and_make_dirs, read_json_file, get_file_size
+from utils import join_paths, read_nii_file, read_json_file, get_file_size
 
 __all__ = ['NSD_Dataset',
            'make_paths_dict', 'fetch_roi_files_and_labels']
@@ -113,7 +113,8 @@ def fetch_roi_files_and_labels(derived_type : str, roi_name : str, thresholds : 
 def make_hdf5(trial_path_dict : dict[str, dict[str, str]], 
               mask_path_list : list[str], 
               thresholds : list[int] | list[None],
-              hdf5_path : str, temp_dir_path : str, device : torch.device = device
+              hdf5_path : str, temp_dir_path : str, device : torch.device = device,
+              split_matrix : bool = False
             ) -> None:
     """  
     """ 
@@ -153,21 +154,20 @@ def make_hdf5(trial_path_dict : dict[str, dict[str, str]],
             os.remove(hdf5_path)
             print(f'{hdf5_path} is removed.')
 
-    blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
     _, mask_data = read_nii_file([x for x in mask_path_list if '.nii.gz' in x and all(sub not in x for sub in ['lh.', 'rh.'])][0])
     thresholds = thresholds if not len(thresholds) == 0 else list(range(1, int(np.max(mask_data))+1))
 
-    npz_files_path_dict = {} # {index : path}
-    reshape_a, reshape_b = -99, -99
-    for index, path_dict in tqdm(trial_path_dict.items(), desc=f'Masking fMRI and Reading imgs', leave=True):
+    numpy_files_path_dict = {} # {index : path}
+    # Save npz files, including masked_data, image, canny, hidden_states. masked_data has not been processed by BLIP-Diffusion
+    uint8_max = np.iinfo(np.uint8).max
+    for index, path_dict in tqdm(trial_path_dict.items(), desc=f'Reading data', leave=True):
         npz_path = join_paths(temp_dir_path, f'{index}.npz')
-        npz_files_path_dict[index] = npz_path
+        numpy_files_path_dict[index] = {'npz' : npz_path}
+
         # check
         if os.path.exists(npz_path):
-            data = np.load(npz_path)
-            del data
             continue
-        # path
+
         image_path = path_dict['image']
         canny_path = path_dict['canny'] 
         hidden_states_path = path_dict['hidden_states']
@@ -175,39 +175,59 @@ def make_hdf5(trial_path_dict : dict[str, dict[str, str]],
         # data
         _, fmri_data = read_nii_file(fmri_path) # Shape of fmri_data: [145, 186, 148]
         masked_data = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
-        masked_data = (masked_data - np.min(masked_data)) / (np.max(masked_data) - np.min(masked_data)) # to 0~1
-        if max(reshape_a, reshape_b) <= 0:
-            reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
-            if min(reshape_a, reshape_b) == 1:
-                masked_data = np.append(masked_data, 0)
+        min_val, max_val = masked_data.min(), masked_data.max()
+        masked_data = (masked_data - min_val) / (max_val - min_val) # to 0~1
+        masked_data = (masked_data*uint8_max).astype(np.uint8) # to 0~255
+        image = np.array(Image.open(image_path))
+        canny = np.array(Image.open(canny_path))
+        hidden_states = np.squeeze(np.load(hidden_states_path, allow_pickle=True))
+        np.savez(npz_path, masked_data=masked_data, image=image, canny=canny, hidden_states=hidden_states)
+    
+    blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
+
+    # Save npy file, including masked_embedding, which has been processed by BLIP Diffusion
+    reshape_a, reshape_b = -99, -99
+    for index, path in tqdm(numpy_files_path_dict.items(), desc=f'Masking data via BLIP Diffusion', leave=True):
+        npy_path = join_paths(temp_dir_path, f'{index}.npy')
+        numpy_files_path_dict[index]['npy'] = npy_path
+
+        # check 
+        if os.path.exists(npy_path):
+            continue
+
+        masked_data = np.load(path['npz'], allow_pickle=True)['masked_data']
+        if split_matrix:
+            if max(reshape_a, reshape_b) <= 0:
                 reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
-        masked_data = (masked_data*(np.iinfo(np.uint8).max)).astype(np.uint8) # to 0~255
-        masked_data = masked_data.reshape(1, reshape_a, reshape_b).repeat(3, axis=0)
-        masked_data = np.transpose(masked_data, (1, 2, 0))
+                if min(reshape_a, reshape_b) == 1:
+                    masked_data = np.append(masked_data, 0)
+                    reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
+            masked_data = masked_data.reshape(1, reshape_a, reshape_b) # (K) -> (1, a, b)
+        else:
+            masked_data = np.tile(masked_data, (masked_data.shape[0], 1)) # (K) -> (K*K)
+            masked_data = masked_data.reshape(1, masked_data.shape[0], masked_data.shape[0]) # (K*K) -> (1, K, K)
+        masked_data = masked_data.repeat(3, axis=0) # (1, a, b) -> (3, a, b)
+        masked_data = np.transpose(masked_data, (1, 2, 0)) # (3, a, b) -> (a, b, 3)
         masked_data = Image.fromarray(masked_data)
         masked_data = bd_vis_processors['eval'](masked_data).cpu().numpy()
-        np.savez(npz_path,  masked_data=masked_data,
-                            image=np.array(Image.open(image_path)),
-                            canny=np.array(Image.open(canny_path)),
-                            hidden_states=np.squeeze(np.load(hidden_states_path, allow_pickle=True))
-            )
-        del masked_data, fmri_data
+        np.save(npy_path, masked_data)
 
     prompt =  [bd_txt_processors['eval']('')]   
 
     with h5py.File(hdf5_path, 'w') as hdf5_file:
-        for index, npz_path in tqdm(npz_files_path_dict.items(), desc=f'{hdf5_path.split(os.sep)[-1]}', leave=True):
+        for index, npz_path_list in tqdm(numpy_files_path_dict.items(), desc=f'{hdf5_path.split(os.sep)[-1]}', leave=True):
             hdf5_group = hdf5_file.create_group(name=str(index))
-            content = np.load(npz_path, allow_pickle=True)
-            cond_images = torch.from_numpy(content['masked_data']).unsqueeze(0).to(device)
+            masked_data = np.load(npz_path_list['npy'], allow_pickle=True)
+            masked_data = torch.from_numpy(masked_data).unsqueeze(0).to(device)
             sample = {
-                'cond_images' : cond_images,
+                'cond_images' : masked_data,
                 'prompt' : prompt,
                 'cond_subject' : 'fMRI',
                 'tgt_subject'  : 'natural scenes image'
             }     
             masked_embedding, _ = blip_diffusion_model.generate_embedding(samples=sample) 
             masked_embedding = masked_embedding[-1].squeeze().cpu().numpy()
+            content = np.load(npz_path_list['npz'], allow_pickle=True)
             for name, data in zip(['masked_embedding', 'image', 'canny', 'hidden_states'], 
                                   [masked_embedding, content['image'], content['canny'],  content['hidden_states']]):
                 hdf5_dataset = hdf5_group.create_dataset(name=name, shape=data.shape, dtype=data.dtype)
@@ -219,8 +239,8 @@ def make_hdf5(trial_path_dict : dict[str, dict[str, str]],
     torch.cuda.empty_cache()
     gc.collect() 
 
-DataPoint = namedtuple('DataPoint', ['index', 'masked_embedding_image', 'masked_embedding_caption',   
-                                     'image', 'canny', 'hidden_states_image', 'hidden_states_caption'])  
+DataPoint = namedtuple('DataPoint', ['index', 'masked_embedding', 'image', 'canny',
+                                     'hidden_states_image', 'hidden_states_caption'])  
 class NSD_HDF5_Dataset(Dataset):
     """
     load proprocessed data from hdf5 file
@@ -242,16 +262,14 @@ class NSD_HDF5_Dataset(Dataset):
         image = data['image'][:]
         canny = data['canny'][:]
         hidden_states = data['hidden_states'][:]
-        masked_embedding_image, masked_embedding_caption = self.__split_and_concat__(masked_embedding)
         hidden_states_image, hidden_states_caption = self.__split_and_concat__(hidden_states)
-        masked_embedding_image = torch.tensor(masked_embedding_image, dtype=torch.float32) # [16, 768]
-        masked_embedding_caption = torch.tensor(masked_embedding_caption, dtype=torch.float32)   # [61, 768]
-        image = torch.tensor(image, dtype=torch.float32)                                   # [425, 425, 3]
-        canny = torch.tensor(canny, dtype=torch.float32)                                   # [448, 448, 3] 
-        hidden_states_image = torch.tensor(hidden_states_image, dtype=torch.float32)       # [16, 768]
-        hidden_states_caption = torch.tensor(hidden_states_caption, dtype=torch.float32)   # [61, 768]
-        return DataPoint(index, masked_embedding_image, masked_embedding_caption, 
-                         image, canny, hidden_states_image, hidden_states_caption)
+        masked_embedding = torch.tensor(masked_embedding, dtype=torch.float32)           # (77, 768)
+        image = torch.tensor(image, dtype=torch.float32)                                 # (425, 425, 3)
+        canny = torch.tensor(canny, dtype=torch.float32)                                 # (448, 448, 3)
+        hidden_states_image = torch.tensor(hidden_states_image, dtype=torch.float32)     # (16, 768)
+        hidden_states_caption = torch.tensor(hidden_states_caption, dtype=torch.float32) # (61, 768)
+        return DataPoint(index, masked_embedding, image, canny, 
+                         hidden_states_image, hidden_states_caption)
 
     def __len__(self) -> int:
         return len(self.hdf5_file.keys())

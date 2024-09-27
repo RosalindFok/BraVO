@@ -1,11 +1,8 @@
 import os
 import re
 import torch
-import shutil
 import argparse
-import platform
 import numpy as np
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 from PIL import Image
 from torch.utils.data import DataLoader
@@ -13,8 +10,8 @@ from torch.utils.data import DataLoader
 from losses import Decoder_loss
 from config import configs_dict
 from dataset import make_paths_dict, fetch_roi_files_and_labels, NSD_HDF5_Dataset, make_hdf5
-from models import device, devices_num, load_blip_models, get_GPU_memory_usage, Image_Decoder, Caption_Decoder
-from utils import join_paths, check_and_make_dirs, NSD_saved_dir_path, fmrishape_saved_dir_path, train_results_dir_path, test_results_dir_path
+from models import device, devices_num, num_workers, load_blip_models, get_GPU_memory_usage, Image_Decoder, Caption_Decoder
+from utils import join_paths, check_and_make_dirs, NSD_saved_dir_path, fmrishape_saved_dir_path, train_results_dir_path, test_results_dir_path, write_json_file
 
 
 def train(
@@ -36,17 +33,17 @@ def train(
     for batches in tqdm(dataloader, desc='Training', leave=True):
         # select the tower, load data to device and set the dtype as float32
         if tower_name in ['image', 'i']:
-            masked_embedding = batches.masked_embedding_image.to(device)
-            hidden_states = batches.hidden_states_image.to(device)
+            input_embedding = batches.masked_embedding.to(device)
+            target_embedding = batches.hidden_states_image.to(device)
         elif tower_name in ['text', 't', 'caption', 'c']:
-            masked_embedding = batches.masked_embedding_caption.to(device)
-            hidden_states = batches.hidden_states_caption.to(device)
+            input_embedding = batches.masked_embedding.to(device)
+            target_embedding = batches.hidden_states_caption.to(device)
         else:
             raise ValueError(f'tower_name={tower_name} is not supported')
         # Forward
-        pred_embedding  = model(masked_embedding)
+        pred_embedding  = model(input_embedding)
         # Compute loss
-        loss = loss_fn(input=pred_embedding, target=hidden_states)
+        loss = loss_fn(input=pred_embedding, target=target_embedding)
         assert not torch.isnan(loss), 'loss is nan, stop training!'
         train_loss.append(loss.item())
         # 3 steps of back propagation
@@ -64,11 +61,13 @@ def test(
     dataloader : DataLoader,
     tower_name : str,
     saved_test_results_dir_path : str = None
-) -> tuple[float, float, float]:
+) -> tuple[float, float]:
     """
     """
+    get_mae_loss = lambda y_pred, y_true: float(np.mean(np.abs(y_pred-y_true)))
+    get_mse_loss = lambda y_pred, y_true: float(np.mean((y_pred-y_true)**2))
     model.eval()
-    mseloss_list = []
+    maeloss_dict, mseloss_dict = {}, {}
     mem_reserved_list = []
     with torch.no_grad():
         desc = 'Testing' if saved_test_results_dir_path is not None else 'Validating'
@@ -76,39 +75,54 @@ def test(
             index = batches.index
             # select the tower, load data to device and set the dtype as float32
             if tower_name in ['image', 'i']:
-                masked_embedding = batches.masked_embedding_image.to(device)
-                target_embedding = batches.hidden_states_image.to(device)
+                input_embedding = batches.masked_embedding.to(device)
             elif tower_name in ['text', 't', 'caption', 'c']:
-                masked_embedding = batches.masked_embedding_caption.to(device)
-                target_embedding = batches.hidden_states_caption.to(device)
+                input_embedding = batches.masked_embedding.to(device)
             else:
                 raise ValueError(f'tower_name={tower_name} is not supported')
             # Forward
-            pred_embedding  = model(masked_embedding)
-            mseloss = torch.nn.MSELoss()(pred_embedding, target_embedding).item()
-            mseloss_list.append(mseloss)
-            # save the results
-            if saved_test_results_dir_path is not None:
-                index = index.cpu().numpy()
-                pred_embedding = pred_embedding.cpu().numpy()
-                hidden_states_image = batches.hidden_states_image.numpy()
-                hidden_states_caption = batches.hidden_states_caption.numpy()
-                image = batches.image.numpy()
-                for idx, pred_emb, true_img_emb, true_cap_emb, img in zip(index, pred_embedding, hidden_states_image, hidden_states_caption, image):
+            pred_embedding  = model(input_embedding)
+            # 
+            index = index.cpu().numpy()
+            pred_embedding = pred_embedding.cpu().numpy()
+            hidden_states_image = batches.hidden_states_image.numpy()
+            hidden_states_caption = batches.hidden_states_caption.numpy()
+            image = batches.image.numpy()
+            for idx, pred_emb, img, hsi, hsc in zip(index, pred_embedding, image, hidden_states_image, hidden_states_caption):
+                true_emb = hsi if tower_name in ['image', 'i'] else hsc
+                save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
+                maeloss_dict[int(idx)] = get_mae_loss(pred_emb, true_emb)
+                mseloss_dict[int(idx)] = get_mse_loss(pred_emb, true_emb)
+                if saved_test_results_dir_path is not None:
                     saved_path = join_paths(saved_test_results_dir_path, str(idx))
                     check_and_make_dirs(saved_path)
-                    if tower_name in ['image', 'i']:
-                        np.save(join_paths(saved_path, 'bravo_img.npy'), pred_emb)
-                    elif tower_name in ['text', 't', 'caption', 'c']:
-                        np.save(join_paths(saved_path, 'bravo_cap.npy'), pred_emb)
-                    np.save(join_paths(saved_path, 'blip_img.npy'), true_img_emb)
-                    np.save(join_paths(saved_path, 'blip_cap.npy'), true_cap_emb)
+                    np.save(join_paths(saved_path, f'bravo{save_tag}'), pred_emb)
+                    np.save(join_paths(saved_path, f'blip_img.npy'), hsi)
+                    np.save(join_paths(saved_path, f'blip_cap.npy'), hsc)
                     np.save(join_paths(saved_path, 'coco.npy'), img.astype(np.uint8))
+
+    # Save the MAE and MSE loss
+    avg_maeloss = sum([value for value in maeloss_dict.values()])/len(maeloss_dict)
+    avg_mseloss = sum([value for value in mseloss_dict.values()])/len(mseloss_dict)
+    max_maeloss_key = max(maeloss_dict, key=maeloss_dict.get)
+    min_maeloss_key = min(maeloss_dict, key=maeloss_dict.get)
+    max_mseloss_key = max(mseloss_dict, key=mseloss_dict.get)
+    min_mseloss_key = min(mseloss_dict, key=mseloss_dict.get)
+    print(f'Average MAE loss: {avg_maeloss:.6f}, Max MAELoss is {max_maeloss_key}: {maeloss_dict[max_maeloss_key]:.6f}, Min MAELoss is {min_maeloss_key}: {maeloss_dict[min_maeloss_key]:.6f}')
+    print(f'Average MSE loss: {avg_mseloss:.6f}, Max MSELoss is {max_mseloss_key}: {mseloss_dict[max_mseloss_key]:.6f}, Min MSELoss is {min_mseloss_key}: {mseloss_dict[min_mseloss_key]:.6f}')
+        
+    if saved_test_results_dir_path is not None:
+        maeloss_dict = {'max key' : max_maeloss_key, 'max val' : maeloss_dict[max_maeloss_key],
+                        'min key' : min_maeloss_key, 'min val' : maeloss_dict[min_maeloss_key], **maeloss_dict}
+        mseloss_dict = {'max key' : max_mseloss_key, 'max val' : mseloss_dict[max_mseloss_key],
+                        'min key' : min_mseloss_key, 'min val' : mseloss_dict[min_mseloss_key], **mseloss_dict}
+        write_json_file(join_paths(saved_test_results_dir_path, f'{tower_name}_maeloss.json'), maeloss_dict)
+        write_json_file(join_paths(saved_test_results_dir_path, f'{tower_name}_mseloss.json'), mseloss_dict)
 
     # Monitor GPU memory usage
     total_memory, mem_reserved = get_GPU_memory_usage()
     mem_reserved_list.append(mem_reserved)
-    return sum(mseloss_list)/len(mseloss_list), total_memory, max(mem_reserved_list)
+    return total_memory, max(mem_reserved_list)
 
 def main() -> None:
     ## Task
@@ -126,7 +140,7 @@ def main() -> None:
     dataset_name = configs_dict['dataset_name']
     # train brain decoder
     batch_size = configs_dict['train_decoder']['batch_size'] * devices_num
-    batch_size = batch_size * 16 if tower_name in ['image', 'i'] else batch_size
+    # batch_size = batch_size * 16 if tower_name in ['image', 'i'] else batch_size
     learning_rate = configs_dict['train_decoder']['learning_rate']
     # learning_rate = learning_rate * 0.1 if tower_name in ['image', 'i'] else learning_rate
     epochs = configs_dict['train_decoder']['epochs']
@@ -183,44 +197,48 @@ def main() -> None:
         check_and_make_dirs(train_temp_dir_path)
         test_temp_dir_path = join_paths(hdf5_dirs, 'test_temp')
         check_and_make_dirs(test_temp_dir_path)
+        flag = False if tower_name in ['image', 'i'] else True
         for hdf5_path, trial_path_dict, temp_dir_path in zip([train_hdf5_path      , test_hdf5_path      ], 
                                                              [train_trial_path_dict, test_trial_path_dict],
                                                              [train_temp_dir_path  , test_temp_dir_path  ]):
             make_hdf5(trial_path_dict=trial_path_dict, mask_path_list=mask_path_list, thresholds=thresholds, 
-                      hdf5_path=hdf5_path, temp_dir_path=temp_dir_path
+                      hdf5_path=hdf5_path, temp_dir_path=temp_dir_path, split_matrix=flag
                     )
         # dataloader
-        num_workers = 6 if platform.system() == 'Linux' else 0
         train_dataloader = DataLoader(dataset=NSD_HDF5_Dataset(hdf5_path=train_hdf5_path), batch_size=batch_size, 
                                       shuffle=False, num_workers=num_workers)
         test_dataloader  = DataLoader(dataset=NSD_HDF5_Dataset(hdf5_path=test_hdf5_path),  batch_size=batch_size, 
                                       shuffle=False, num_workers=num_workers)
         # Loss function
-        decoder_loss = Decoder_loss(w1=1, w2=0.5) 
+        decoder_loss = Decoder_loss(w1=0.5, w2=0.5, w3=0) 
         # Network
         light_loader = next(iter(test_dataloader))
         if tower_name in ['image', 'i']:
-            input_shape  = light_loader.masked_embedding_image.shape[1:] 
+            input_shape  = light_loader.masked_embedding.shape[1:] 
             output_shape = light_loader.hidden_states_image.shape[1:] 
             decoder_model = Image_Decoder(input_shape=input_shape, output_shape=output_shape)
         elif tower_name in ['text', 't', 'caption', 'c']:
-            input_shape  = light_loader.masked_embedding_caption.shape[1:] 
+            input_shape  = light_loader.masked_embedding.shape[1:] 
             output_shape = light_loader.hidden_states_caption.shape[1:] 
             decoder_model = Caption_Decoder(input_shape=input_shape, output_shape=output_shape)
+        print(f'Input Shape = {input_shape}, Output Shape = {output_shape}')
         trainable_parameters = sum(p.numel() for p in decoder_model.parameters() if p.requires_grad)
         decoder_model = decoder_model.to(device=device)
+        print(decoder_model)
         # decoder_model = torch.nn.DataParallel(decoder_model)
         print(f'The number of trainable parametes of {decoder_model.__class__.__name__} is {trainable_parameters}.')
         # Optimizer
-        optimizer_of_brain_decoder = torch.optim.AdamW(decoder_model.parameters(), lr=learning_rate) 
+        optimizer_of_brain_decoder = torch.optim.Adam(decoder_model.parameters(), lr=learning_rate) 
+        # optimizer_of_brain_decoder = torch.optim.AdamW(decoder_model.parameters(), lr=learning_rate) 
+        # optimizer_of_brain_decoder = torch.optim.SGD(decoder_model.parameters(), lr=learning_rate, momentum=0.9)
+        # optimizer_of_brain_decoder = torch.optim.RMSprop(decoder_model.parameters(), lr=learning_rate)
         print(f'Training Brain {decoder_model.__class__.__name__} for {epochs} epochs. batch_size={batch_size}, learning_rate={learning_rate}.')
-        valid_mseloss_list = []
         for epoch in range(epochs):
             print(f'Tower {tower_name}, Epoch {epoch+1}/{epochs}')
             # train
-            lr = learning_rate*((1-epoch/epochs)**0.9)
-            for param_group in optimizer_of_brain_decoder.param_groups:
-                param_group['lr'] = lr
+            # lr = learning_rate*((1-epoch/epochs)**0.9)
+            # for param_group in optimizer_of_brain_decoder.param_groups:
+            #     param_group['lr'] = lr
             trained_model, train_loss, total_memory, mem_reserved = train(device=device, 
                                                                           model=decoder_model, 
                                                                           loss_fn=decoder_loss, 
@@ -231,17 +249,17 @@ def main() -> None:
             # Save the temporal trained model in each epoch
             temporary_model_path = join_paths(saved_subj_train_result_dir_path, f'temporary_ep-{epoch+1}_lr-{learning_rate}.pth')
             torch.save(trained_model.state_dict(), temporary_model_path)
+            print(f'Train {decoder_loss.__class__.__name__} = {train_loss:.6f}')
             # valid
             decoder_model.load_state_dict(torch.load(temporary_model_path, weights_only=True))
-            MSELoss, _, _ = test(device=device, 
-                                 model=decoder_model, 
-                                 dataloader=test_dataloader,
-                                 tower_name=tower_name, 
-                                 saved_test_results_dir_path=None
-                                )
+            _, _ = test(device=device, 
+                        model=decoder_model, 
+                        dataloader=test_dataloader,
+                        tower_name=tower_name, 
+                        saved_test_results_dir_path=None
+                    )
+            # GPU memory usage
             print(f'GPU memory usage: {mem_reserved:.2f} GB / {total_memory:.2f} GB.')
-            print(f'Train {decoder_loss.__class__.__name__} = {train_loss:.6f}, Valid MSELoss = {MSELoss:.6f}.\n')
-            valid_mseloss_list.append(MSELoss)
 
         # save the finally trained model, delete the temporal trained model
         for pth_file_path in os.listdir(saved_subj_train_result_dir_path):
@@ -249,25 +267,16 @@ def main() -> None:
                 os.remove(join_paths(saved_subj_train_result_dir_path, pth_file_path))
         torch.save(trained_model.state_dict(), saved_model_path)
 
-        # Draw a line chart for valid_mseloss_list
-        plt.plot(range(1, epochs+1), valid_mseloss_list)
-        plt.xlabel('Epoch')
-        plt.ylabel('MSELoss')
-        plt.title(f'Brain Decoder MSELoss (valid)')
-        plt.savefig(join_paths(saved_subj_train_result_dir_path, f'brain_{tower_name}_decoder_valid_mseloss.png'))
-        plt.close()
-
         # test
         print(f'Testing Brain Decoder.')
         # load the trained model
         decoder_model.load_state_dict(torch.load(saved_model_path, weights_only=True))
-        MSELoss, total_memory, mem_reserved = test(device=device, 
-                                      model=decoder_model, 
-                                      dataloader=test_dataloader, 
-                                      tower_name=tower_name,
-                                      saved_test_results_dir_path=saved_test_results_dir_path
+        total_memory, mem_reserved = test(device=device, 
+                                          model=decoder_model, 
+                                          dataloader=test_dataloader, 
+                                          tower_name=tower_name,
+                                          saved_test_results_dir_path=saved_test_results_dir_path
                                     )
-        print(f'Averaged MSELoss = {MSELoss:.4f}.')
         print(f'GPU memory usage: {mem_reserved:.2f} GB / {total_memory:.2f} GB.')
     
     # Generate
@@ -307,18 +316,17 @@ def main() -> None:
         for dir_path in test_dirs_path_list:
             print(f'Generating {dir_path} / {len(test_dirs_path_list)}.')
             dir_path = join_paths(saved_test_results_dir_path, dir_path)
-            assert (num_files := len(contents := os.listdir(dir_path))) in [5, 6], f'Unexpected number of files: {num_files}. Contents: {contents}'
             coco_matrix = np.load(join_paths(dir_path, 'coco.npy'), allow_pickle=True)
             coco = Image.fromarray(coco_matrix).convert('RGB')
-            bravo_img = np.load(join_paths(dir_path, 'bravo_img.npy'), allow_pickle=True)
+            # bravo_img = np.load(join_paths(dir_path, 'bravo_img.npy'), allow_pickle=True)
             bravo_cap = np.load(join_paths(dir_path, 'bravo_cap.npy'), allow_pickle=True)
             blip_img  = np.load(join_paths(dir_path, 'blip_img.npy' ), allow_pickle=True)
             blip_cap  = np.load(join_paths(dir_path, 'blip_cap.npy' ), allow_pickle=True)
             hidden_state_dict = {
                 'blip'    : __concatenate_embeddings__(img_emb=blip_img , txt_emb=blip_cap ),
-                'caption' : __concatenate_embeddings__(img_emb=blip_img , txt_emb=bravo_cap),
-                'image'   : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=blip_cap ),
-                'img+cap' : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=bravo_cap)
+                'bravo' : __concatenate_embeddings__(img_emb=blip_img , txt_emb=bravo_cap),
+                # 'image'   : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=blip_cap ),
+                # 'img+cap' : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=bravo_cap)
             }
             images_dict = {
                 'coco' : coco
@@ -340,6 +348,30 @@ def main() -> None:
                 images_dict[key] = generated_image.convert('RGB')
             
             __merge_images_with_separators__(images_dict=images_dict, saved_dir_path=dir_path)
+        # blip_img_npy_path  = join_paths('..', 'BraVO_saved', 'test_results', 'nsd', 'subj01', 'surface_prf-visualrois', '0', 'blip_img.npy')
+        # bravo_img_npy_path = join_paths('..', 'BraVO_saved', 'test_results', 'nsd', 'subj01', 'surface_prf-visualrois', '0', 'bravo_img.npy')
+        # bravo_cap_npy_path  = join_paths('..', 'BraVO_saved', 'test_results', 'nsd', 'subj01', 'surface_prf-visualrois', '0', 'bravo_cap.npy')
+        # blip_img  = np.load(blip_img_npy_path , allow_pickle=True)
+        # bravo_img = np.load(bravo_img_npy_path, allow_pickle=True)
+        # bravo_cap = np.load(bravo_cap_npy_path, allow_pickle=True)
+        # for j in range(16):
+        #     for i in range(blip_img.shape[0]-j):
+        #         copy_blip_img = blip_img.copy()
+        #         copy_blip_img[i:i+j+1] = bravo_img[i:i+j+1]
+        #         hidden_state = __concatenate_embeddings__(img_emb=copy_blip_img, txt_emb=bravo_cap)
+        #         hidden_state = torch.from_numpy(hidden_state).unsqueeze(0).to(device)
+        #         generated_image = blip_diffusion_model.generate_image_via_embedding(
+        #                                                         uncond_embedding=uncond_embedding,
+        #                                                         hidden_states=hidden_state,
+        #                                                         causal_attention_mask=causal_attention_mask,
+        #                                                         seed=iter_seed,
+        #                                                         guidance_scale=guidance_scale,
+        #                                                         height=425,
+        #                                                         width=425,
+        #                                                         num_inference_steps=num_inference_steps,
+        #                                                     )
+        #         generated_image = generated_image.convert('RGB')
+        #         generated_image.save(join_paths('..', f'{i}-{j}.png'))
 
     else:
         raise ValueError(f'Task should be either [train test generate generation], but got {task}.')
@@ -347,3 +379,4 @@ def main() -> None:
 if __name__ == '__main__':
     main()
     print('Done.\n\n')
+   
