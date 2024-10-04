@@ -119,36 +119,3 @@ sbatch -p gpu_4090 --gpus=1 step3_run.sh # N40R4
 conda deactivate
 conda env remove -n BraVO
 ```
-
-
-tar -czvf 05.tar.gz timeseries_session05* && rm -rf timeseries_session05*
-tar -czvf 06.tar.gz timeseries_session06* && rm -rf timeseries_session06*
-tar -czvf 07.tar.gz timeseries_session07* && rm -rf timeseries_session07*
-tar -czvf 08.tar.gz timeseries_session08* && rm -rf timeseries_session08*
-tar -czvf 09.tar.gz timeseries_session09* && rm -rf timeseries_session09*
-
-tar -czvf 10.tar.gz timeseries_session10* && rm -rf timeseries_session10*
-tar -czvf 11.tar.gz timeseries_session11* && rm -rf timeseries_session11*
-tar -czvf 12.tar.gz timeseries_session12* && rm -rf timeseries_session12*
-tar -czvf 13.tar.gz timeseries_session13* && rm -rf timeseries_session13*
-tar -czvf 14.tar.gz timeseries_session14* && rm -rf timeseries_session14*
-tar -czvf 15.tar.gz timeseries_session15* && rm -rf timeseries_session15*
-tar -czvf 16.tar.gz timeseries_session16* && rm -rf timeseries_session16*
-tar -czvf 17.tar.gz timeseries_session17* && rm -rf timeseries_session17*
-tar -czvf 18.tar.gz timeseries_session18* && rm -rf timeseries_session18*
-tar -czvf 19.tar.gz timeseries_session19* && rm -rf timeseries_session19*
-
-tar -czvf 20.tar.gz timeseries_session20* && rm -rf timeseries_session20*
-tar -czvf 21.tar.gz timeseries_session21* && rm -rf timeseries_session21*
-tar -czvf 22.tar.gz timeseries_session22* && rm -rf timeseries_session22*
-tar -czvf 23.tar.gz timeseries_session23* && rm -rf timeseries_session23*
-tar -czvf 24.tar.gz timeseries_session24* && rm -rf timeseries_session24*
-tar -czvf 25.tar.gz timeseries_session25* && rm -rf timeseries_session25*
-tar -czvf 26.tar.gz timeseries_session26* && rm -rf timeseries_session26*
-tar -czvf 27.tar.gz timeseries_session27* && rm -rf timeseries_session27*
-tar -czvf 28.tar.gz timeseries_session28* && rm -rf timeseries_session28*
-tar -czvf 29.tar.gz timeseries_session29* && rm -rf timeseries_session29*
-
-tar -czvf 30.tar.gz timeseries_session30* && rm -rf timeseries_session30*
-tar -czvf 31.tar.gz timeseries_session31* && rm -rf timeseries_session31*
-tar -czvf 32.tar.gz timeseries_session32* && rm -rf timeseries_session32*

@@ -6,6 +6,8 @@ import json
 import numpy as np
 import nibabel as nib
 
+from config import configs_dict
+
 ''' utility functions '''
 join_paths = lambda *args: os.path.abspath(os.path.join(*args))
 read_nii_file = lambda path: [nib.load(path).header, nib.load(path).get_fdata()]
@@ -123,3 +125,12 @@ check_and_make_dirs(NSD_saved_dir_path)
 fmrishape_saved_dir_path = join_paths(BraVO_saved_dir_path, 'fMRIShape_preprocessed_pairs')
 check_and_make_dirs(fmrishape_saved_dir_path)
 sam2_ckpt_dir_path = join_paths('..', 'large_files_for_BraVO', 'SAM2')
+# for NSD subj  
+nsd_subject_saved_dir_path = join_paths(NSD_saved_dir_path, f"subj{str(configs_dict['subj_id']).zfill(2)}")
+check_and_make_dirs(nsd_subject_saved_dir_path)
+run_files_path = join_paths(nsd_subject_saved_dir_path, 'run_files.json')
+# for fMRIShape subj  
+fmrishape_subject_saved_dir_path = join_paths(fmrishape_saved_dir_path, f"subj{str(configs_dict['subj_id']).zfill(2)})")
+check_and_make_dirs(fmrishape_subject_saved_dir_path)
+
+

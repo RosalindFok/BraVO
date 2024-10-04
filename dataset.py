@@ -3,6 +3,7 @@ import gc
 import h5py
 import copy
 import torch
+import shutil
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -10,89 +11,31 @@ from collections import namedtuple
 from torch.utils.data import Dataset
 
 from models import device, load_blip_models
-from utils import join_paths, read_nii_file, read_json_file, get_file_size
+from utils import run_files_path, join_paths, read_nii_file, check_and_make_dirs, read_json_file, get_file_size
 
-__all__ = ['NSD_Dataset',
-           'make_paths_dict', 'fetch_roi_files_and_labels']
+os.environ['TOKENIZERS_PARALLELISM'] = 'false' 
 
 ########################
 ###### NSD Dataset #####
 ######################## 
 
-def make_paths_dict(subj_path : str) -> tuple[dict[str, dict[str, str]], 
-                                              dict[str, dict[str, str]], 
-                                              dict[str, dict[str, list[str]]],
-                                              np.ndarray, np.ndarray]:
+def fetch_nsd_rois_and_labels(subj_path : str, rois_setup : namedtuple) -> tuple[np.ndarray, str]:
     """  
-    """  
+    """
+    derived_type = rois_setup.derived_type
+    roi_name = rois_setup.roi_name
+    thresholds = rois_setup.thresholds
+
     rois_path = join_paths(subj_path, 'ROIs')
     assert os.path.exists(rois_path), f'dir_path={rois_path} does not exist.'
-    uncond_embedding_npy_path = join_paths(subj_path, 'uncond_embedding.npy')
-    assert os.path.exists(uncond_embedding_npy_path), f'file path={uncond_embedding_npy_path} does not exist.'
-    causal_attention_mask_path = join_paths(subj_path, 'causal_attention_mask.npy')
-    assert os.path.exists(causal_attention_mask_path), f'file path={causal_attention_mask_path} does not exist.'
-
-    def __make_path_dict__(mode : str) -> dict[str, dict[str, str]]:
-        """  
-        """  
-        dir_path = join_paths(subj_path, mode)
-        assert os.path.exists(dir_path), f'dir_path={dir_path} does not exist.'
-        trial_paths_list = [join_paths(dir_path, x) for x in os.listdir(dir_path)]
-        trial_path_dict = {}
-        find_and_join_paths = lambda trail_path, string: [os.path.join(trail_path, filename) for filename in os.listdir(trail_path) if string+'.' in filename]
-        for index, trail_path in tqdm(enumerate(trial_paths_list), desc=f'Making {mode} paths dict', leave=True, total=len(trial_paths_list)):
-            trial_path_dict[index] = {}
-            for key in ['fmri', 'image', 'canny', 'hidden_states', 'strings']:
-                path_list = find_and_join_paths(trail_path=trail_path, string=key)
-                assert len(path_list) > 0, f'No {key} files found in {trail_path}.'
-                assert len(path_list) == 1, f'Multiple {key} files found in {trail_path}.'
-                trial_path_dict[index][key] = path_list[0]
-        return trial_path_dict
-        
-    train_trial_path_dict = __make_path_dict__(mode = 'train')
-    test_trial_path_dict  = __make_path_dict__(mode = 'test')
-
-    # ROIs
     rois_path_dict = {} # {key=surface or volume, value=dict{key=roi_name, value=list[roi_path]}}
-    for derived_type in os.listdir(rois_path):
-        derived_type_path = join_paths(rois_path, derived_type)
-        rois_path_dict[derived_type] = {}
-        for roi_name in os.listdir(derived_type_path):
-            roi_name_path = join_paths(derived_type_path, roi_name)
-            rois_path_dict[derived_type][roi_name] = [join_paths(roi_name_path, x) for x in os.listdir(roi_name_path)]
+    for d in os.listdir(rois_path):
+        derived_type_path = join_paths(rois_path, d)
+        rois_path_dict[d] = {}
+        for r in os.listdir(derived_type_path):
+            roi_name_path = join_paths(derived_type_path, r)
+            rois_path_dict[d][r] = [join_paths(roi_name_path, x) for x in os.listdir(roi_name_path)]
 
-    # uncond_embedding
-    uncond_embedding = np.load(uncond_embedding_npy_path, allow_pickle=True)
-    assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} != (1, 77, 768)'
-    # causal_attention_mask
-    causal_attention_mask = np.load(causal_attention_mask_path, allow_pickle=True)
-    assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask.shape={causal_attention_mask.shape} != (1, 1, 77, 77)'
-    return train_trial_path_dict, test_trial_path_dict, rois_path_dict, uncond_embedding, causal_attention_mask
-
-def fetch_roi_files_and_labels(derived_type : str, roi_name : str, thresholds : list[int] | list[None],
-                               rois_path_dict : dict[str, dict[str, list[str]]]
-                        ) -> tuple[list[str], str]:
-    """  
-    Fetches the file paths and corresponding label string for a specific region of interest (ROI) based on the  
-    derived type and thresholds.  
-
-    Args:  
-        derived_type (str): The type of derived ROI data (e.g., 'structural', 'functional').  
-        roi_name (str): The name of the ROI.  
-        thresholds (list[int] | list[None]): A list of integer thresholds or None. Thresholds define the   
-                                              specific labels to be included.  
-        rois_path_dict (dict[str, dict[str, list[str]]]): A nested dictionary where the keys are derived types,   
-                                                          and the values are dictionaries with ROI names as keys   
-                                                          and lists of file paths as values.  
-    
-    Returns:  
-        tuple[list[str], str]: A tuple containing a list of file paths related to the ROI and a concatenated   
-                               label string corresponding to the thresholds.  
-
-    Raises:  
-        ValueError: If the derived_type or roi_name is not found in the rois_path_dict.  
-        AssertionError: If the number of files related to the ROI is not exactly 4.  
-    """   
     if not derived_type in rois_path_dict.keys():
         raise ValueError(f'derived_type should be one of {rois_path_dict.keys()}, but got {derived_type}')
     if not roi_name in rois_path_dict[derived_type].keys():
@@ -103,21 +46,29 @@ def fetch_roi_files_and_labels(derived_type : str, roi_name : str, thresholds : 
     assert len(files_path_list) == 4, print(f'{files_path_list}')
     json_path = [f for f in files_path_list if f.endswith('.json')][0]
     files_path_list.remove(json_path)
+    _, mask_data = read_nii_file([x for x in files_path_list if '.nii.gz' in x and all(sub not in x for sub in ['lh.', 'rh.'])][0])
 
     label_tags = read_json_file(json_path)
     label_tags = {int(key) : value for key, value in label_tags.items()}
     labels = [label_tags[threshold] for threshold in thresholds] if not len(thresholds) == 0 else [value for key, value in label_tags.items() if key > 0]
     labels_string = '_'.join(labels)
-    return files_path_list, labels_string
 
-def make_hdf5(trial_path_dict : dict[str, dict[str, str]], 
-              mask_path_list : list[str], 
-              thresholds : list[int] | list[None],
-              hdf5_path : str, temp_dir_path : str, device : torch.device = device,
-              split_matrix : bool = False
-            ) -> None:
-    """  
-    """ 
+    thresholds = thresholds if not len(thresholds) == 0 else list(range(1, int(np.max(mask_data))+1))
+
+    return mask_data, thresholds, labels_string
+
+def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[int], labels_string : str
+                     ) -> tuple[any, any]:
+    def __masking_fmri_to_array__(fmri_data : np.ndarray, 
+                              mask_data : np.ndarray, thresholds : list[int]) -> np.ndarray:
+        """  
+        """ 
+        mask_data = mask_data.astype(np.int16)
+        mask_bool = np.isin(mask_data, thresholds)
+        masked_data = fmri_data[mask_bool] if np.any(mask_bool) else None
+        assert masked_data is not None, f'No voxels in thresholds={thresholds} found in mask_data.'
+        return masked_data
+    
     def __find_factors__(n : int) -> tuple[int, int]:
         """
         """
@@ -134,121 +85,98 @@ def make_hdf5(trial_path_dict : dict[str, dict[str, str]],
                     best_a, best_b = i, j  
         return best_a, best_b
     
-    def __masking_fmri_to_array__(fmri_data : np.ndarray, 
-                              mask_data : np.ndarray, thresholds : list[int]) -> np.ndarray:
-        """  
-        """ 
-        mask_data = mask_data.astype(np.int16)
-        mask_bool = np.isin(mask_data, thresholds)
-        masked_data = fmri_data[mask_bool] if np.any(mask_bool) else None
-        assert masked_data is not None, f'No voxels in thresholds={thresholds} found in mask_data.'
-        return masked_data
+    regions_saved_dir_path = join_paths(subj_path, labels_string)
+    check_and_make_dirs(regions_saved_dir_path)
+
+    assert os.path.exists(run_files_path), f'run_files_path={run_files_path} does not exist, please run step1_run.sh first.'
+    run_files = read_json_file(join_paths(run_files_path))
+    train_hdf5_path = run_files['train']['hdf5']
+    train_json_path = run_files['train']['json']
+    test_hdf5_path  = run_files['test']['hdf5']
+    test_json_path  = run_files['test']['json']
+    uncond_embedding_path = run_files['uncond_embedding_path']
+    causal_attention_mask_path = run_files['causal_attention_mask_path']
     
-    if os.path.exists(hdf5_path):
-        try:
-            with h5py.File(hdf5_path, 'r') as hdf5_file:  
-                if  len(list(hdf5_file.keys())) == len(trial_path_dict):
-                    print(f'{hdf5_path} already exists, the size of it is {get_file_size(hdf5_path)}')
-                    return None
-        except Exception as e:
-            os.remove(hdf5_path)
-            print(f'{hdf5_path} is removed.')
-
-    _, mask_data = read_nii_file([x for x in mask_path_list if '.nii.gz' in x and all(sub not in x for sub in ['lh.', 'rh.'])][0])
-    thresholds = thresholds if not len(thresholds) == 0 else list(range(1, int(np.max(mask_data))+1))
-
-    numpy_files_path_dict = {} # {index : path}
-    # Save npz files, including masked_data, image, canny, hidden_states. masked_data has not been processed by BLIP-Diffusion
-    uint8_max = np.iinfo(np.uint8).max
-    for index, path_dict in tqdm(trial_path_dict.items(), desc=f'Reading data', leave=True):
-        npz_path = join_paths(temp_dir_path, f'{index}.npz')
-        numpy_files_path_dict[index] = {'npz' : npz_path}
-
-        # check
-        if os.path.exists(npz_path):
+    for tag, hdf5_path, json_path in zip(['test', 'train'], [test_hdf5_path, train_hdf5_path], [test_json_path, train_json_path]):
+        set_saved_dir_path = join_paths(regions_saved_dir_path, tag)
+        check_and_make_dirs(set_saved_dir_path)
+        all_done_path = join_paths(set_saved_dir_path, 'all_done')
+        if os.path.exists(all_done_path):
             continue
+        # load blip model
+        blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
+        prompt =  [bd_txt_processors['eval']('')]   
+        # In json, index:string_path
+        strings_path = read_json_file(json_path)
+        # In hdf5, index:{image ,  fmri ,  hidden_states ,  causal_attention_mask}
+        uint8_max = np.iinfo(np.uint8).max
+        reshape_a, reshape_b = -99, -99
+        with h5py.File(hdf5_path, 'r') as file:
+            for index in tqdm(file, desc=f'process {tag}', leave=True):
+                # dir
+                idx_dir_path = join_paths(set_saved_dir_path, index)
+                check_and_make_dirs(idx_dir_path)
+                # check if already done
+                done_path = join_paths(idx_dir_path, 'done')
+                if os.path.exists(done_path):
+                    continue
+                # strings
+                shutil.copy(src=strings_path[index], dst=join_paths(idx_dir_path, 'strings.json'))
+                # blip output
+                hidden_states = file[index]['hidden_states'][:]
+                np.save(file=join_paths(idx_dir_path, 'blip_hidden_states.npy'), arr=hidden_states)
+                # coco image
+                image = file[index]['image'][:]
+                Image.fromarray(image).save(fp=join_paths(idx_dir_path, 'coco_image.png'))
+                # mask fmri -> embedding
+                fmri_data = file[index]['fmri'][:]
+                masked_fmri = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
+                min_val, max_val = masked_fmri.min(), masked_fmri.max()
+                masked_fmri = (masked_fmri - min_val) / (max_val - min_val) # to 0~1
+                masked_fmri = (masked_fmri*uint8_max).astype(np.uint8) # to 0~255
+                if max(reshape_a, reshape_b) <= 0:
+                    reshape_a, reshape_b = __find_factors__(masked_fmri.shape[0])
+                    if min(reshape_a, reshape_b) == 1:
+                        masked_fmri = np.append(masked_fmri, 0)
+                        reshape_a, reshape_b = __find_factors__(masked_fmri.shape[0])
+                masked_fmri = masked_fmri.reshape(1, reshape_a, reshape_b) # (K) -> (1, a, b)
+                masked_fmri = masked_fmri.repeat(3, axis=0) # (1, a, b) -> (3, a, b)
+                masked_fmri = np.transpose(masked_fmri, (1, 2, 0)) # (3, a, b) -> (a, b, 3)
+                masked_fmri = Image.fromarray(masked_fmri)
+                masked_fmri = bd_vis_processors['eval'](masked_fmri).cpu().numpy()
+                masked_fmri = torch.from_numpy(masked_fmri).unsqueeze(0).to(device)
+                sample = {
+                    'cond_images' : masked_fmri,
+                    'prompt' : prompt,
+                    'cond_subject' : 'fMRI',
+                    'tgt_subject'  : 'natural scenes image'
+                }     
+                masked_embedding, _ = blip_diffusion_model.generate_embedding(samples=sample) 
+                masked_embedding = masked_embedding[-1].squeeze().cpu().numpy()
+                np.save(file=join_paths(idx_dir_path, 'blip_masked_embedding.npy'), arr=masked_embedding)
+                # Done flag
+                with open(done_path, 'w') as f:
+                    f.write('Done')
 
-        image_path = path_dict['image']
-        canny_path = path_dict['canny'] 
-        hidden_states_path = path_dict['hidden_states']
-        fmri_path = path_dict['fmri']
-        # data
-        _, fmri_data = read_nii_file(fmri_path) # Shape of fmri_data: [145, 186, 148]
-        masked_data = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
-        min_val, max_val = masked_data.min(), masked_data.max()
-        masked_data = (masked_data - min_val) / (max_val - min_val) # to 0~1
-        masked_data = (masked_data*uint8_max).astype(np.uint8) # to 0~255
-        image = np.array(Image.open(image_path))
-        canny = np.array(Image.open(canny_path))
-        hidden_states = np.squeeze(np.load(hidden_states_path, allow_pickle=True))
-        np.savez(npz_path, masked_data=masked_data, image=image, canny=canny, hidden_states=hidden_states)
+        # delete the loaded models
+        del blip_diffusion_model, bd_vis_processors, bd_txt_processors
+        torch.cuda.empty_cache()
+        gc.collect() 
+
+        with open(all_done_path, 'w') as f:
+            f.write('Done')
     
-    blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
+    return uncond_embedding_path, causal_attention_mask_path, regions_saved_dir_path
 
-    # Save npy file, including masked_embedding, which has been processed by BLIP Diffusion
-    reshape_a, reshape_b = -99, -99
-    for index, path in tqdm(numpy_files_path_dict.items(), desc=f'Masking data via BLIP Diffusion', leave=True):
-        npy_path = join_paths(temp_dir_path, f'{index}.npy')
-        numpy_files_path_dict[index]['npy'] = npy_path
-
-        # check 
-        if os.path.exists(npy_path):
-            continue
-
-        masked_data = np.load(path['npz'], allow_pickle=True)['masked_data']
-        if split_matrix:
-            if max(reshape_a, reshape_b) <= 0:
-                reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
-                if min(reshape_a, reshape_b) == 1:
-                    masked_data = np.append(masked_data, 0)
-                    reshape_a, reshape_b = __find_factors__(masked_data.shape[0])
-            masked_data = masked_data.reshape(1, reshape_a, reshape_b) # (K) -> (1, a, b)
-        else:
-            masked_data = np.tile(masked_data, (masked_data.shape[0], 1)) # (K) -> (K*K)
-            masked_data = masked_data.reshape(1, masked_data.shape[0], masked_data.shape[0]) # (K*K) -> (1, K, K)
-        masked_data = masked_data.repeat(3, axis=0) # (1, a, b) -> (3, a, b)
-        masked_data = np.transpose(masked_data, (1, 2, 0)) # (3, a, b) -> (a, b, 3)
-        masked_data = Image.fromarray(masked_data)
-        masked_data = bd_vis_processors['eval'](masked_data).cpu().numpy()
-        np.save(npy_path, masked_data)
-
-    prompt =  [bd_txt_processors['eval']('')]   
-
-    with h5py.File(hdf5_path, 'w') as hdf5_file:
-        for index, npz_path_list in tqdm(numpy_files_path_dict.items(), desc=f'{hdf5_path.split(os.sep)[-1]}', leave=True):
-            hdf5_group = hdf5_file.create_group(name=str(index))
-            masked_data = np.load(npz_path_list['npy'], allow_pickle=True)
-            masked_data = torch.from_numpy(masked_data).unsqueeze(0).to(device)
-            sample = {
-                'cond_images' : masked_data,
-                'prompt' : prompt,
-                'cond_subject' : 'fMRI',
-                'tgt_subject'  : 'natural scenes image'
-            }     
-            masked_embedding, _ = blip_diffusion_model.generate_embedding(samples=sample) 
-            masked_embedding = masked_embedding[-1].squeeze().cpu().numpy()
-            content = np.load(npz_path_list['npz'], allow_pickle=True)
-            for name, data in zip(['masked_embedding', 'image', 'canny', 'hidden_states'], 
-                                  [masked_embedding, content['image'], content['canny'],  content['hidden_states']]):
-                hdf5_dataset = hdf5_group.create_dataset(name=name, shape=data.shape, dtype=data.dtype)
-                hdf5_dataset[:] = data
-    print(f'{hdf5_path} is created, the size of it is {get_file_size(hdf5_path)}')
-
-    # Release memory and garbage collect
-    del blip_diffusion_model, bd_vis_processors, bd_txt_processors
-    torch.cuda.empty_cache()
-    gc.collect() 
-
-DataPoint = namedtuple('DataPoint', ['index', 'masked_embedding', 'image', 'canny',
-                                     'hidden_states_image', 'hidden_states_caption'])  
-class NSD_HDF5_Dataset(Dataset):
+DataPoint = namedtuple('DataPoint', ['index', 'image', 'blip_masked_embedding', 'hidden_states_image', 'hidden_states_caption', 'strings_json_path'])  
+class NSD_Dataset(Dataset):
     """
     load proprocessed data from hdf5 file
     """
-    def __init__(self, hdf5_path : str) -> None:
+    def __init__(self, root_dir : str) -> None:
         super().__init__()
-        assert os.path.exists(hdf5_path), f'{hdf5_path} does not exist.'
-        self.hdf5_file = h5py.File(hdf5_path, 'r') 
+        assert os.path.exists(root_dir), f'{root_dir} does not exist.'
+        self.dirs = {int(d) : os.path.join(root_dir, d) for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))}
 
     def __split_and_concat__(self, array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         array_1, array_2, arrayr_3 = np.split(array, [2, 18]) # BLIP decides, 77 = 2+16+59
@@ -256,27 +184,25 @@ class NSD_HDF5_Dataset(Dataset):
         text_embedding = np.concatenate((array_1, arrayr_3), axis=0)
         return image_embedding, text_embedding
 
-    def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        data = self.hdf5_file[str(index)]
-        masked_embedding = data['masked_embedding'][:]
-        image = data['image'][:]
-        canny = data['canny'][:]
-        hidden_states = data['hidden_states'][:]
-        hidden_states_image, hidden_states_caption = self.__split_and_concat__(hidden_states)
-        masked_embedding = torch.tensor(masked_embedding, dtype=torch.float32)           # (77, 768)
+    def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, str]:
+        dir_path = self.dirs[index]
+        image = np.array(Image.open(os.path.join(dir_path, 'coco_image.png')))
+        blip_hidden_states = np.load(os.path.join(dir_path, 'blip_hidden_states.npy'), allow_pickle=True)
+        hidden_states_image, hidden_states_caption = self.__split_and_concat__(np.squeeze(blip_hidden_states))
+        blip_masked_embedding = np.squeeze(np.load(os.path.join(dir_path, 'blip_masked_embedding.npy'), allow_pickle=True))
+        strings_json_path = os.path.join(dir_path, 'strings.json')
+
         image = torch.tensor(image, dtype=torch.float32)                                 # (425, 425, 3)
-        canny = torch.tensor(canny, dtype=torch.float32)                                 # (448, 448, 3)
+        blip_masked_embedding = torch.tensor(blip_masked_embedding, dtype=torch.float32) # (77, 768)
         hidden_states_image = torch.tensor(hidden_states_image, dtype=torch.float32)     # (16, 768)
         hidden_states_caption = torch.tensor(hidden_states_caption, dtype=torch.float32) # (61, 768)
-        return DataPoint(index, masked_embedding, image, canny, 
-                         hidden_states_image, hidden_states_caption)
+        
+        return DataPoint(index, image, blip_masked_embedding, hidden_states_image, hidden_states_caption, strings_json_path)
 
     def __len__(self) -> int:
-        return len(self.hdf5_file.keys())
+        return len(self.dirs)
     
-    def __del__(self):  
-        self.hdf5_file.close()  
-        
+
 ########################
 ###### fMRI_Shape  #####
 ######################## 

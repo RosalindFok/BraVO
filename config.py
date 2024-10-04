@@ -15,7 +15,7 @@ configs_dict = {
 
     'train_decoder' : {
         'batch_size' : 128, 
-        'learning_rate' : 1e-4,
+        'learning_rate' : 5e-4,
         'epochs' : 20,
     },
 
@@ -26,4 +26,7 @@ configs_dict = {
         'num_inference_steps' : 500, 
     },
 
+    'blip_caption' : {
+        'prompt' : 'Please provide a detailed description of this image, including all visible elements such as objects, people, settings, actions, colors, and emotions, and please do not generate repetitive statements.'
+    }
 }

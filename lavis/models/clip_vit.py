@@ -252,7 +252,7 @@ def create_clip_vit_L(img_size=224,use_checkpoint=False,precision="fp16"):
     cached_file = download_cached_file(
         url, check_hash=False, progress=True
     )
-    state_dict = torch.load(cached_file, map_location="cpu")    
+    state_dict = torch.load(cached_file, map_location="cpu", weights_only=True)    
     interpolate_pos_embed(model,state_dict)
     
     incompatible_keys = model.load_state_dict(state_dict, strict=False)

@@ -17,8 +17,8 @@ from lavis.models.blip_diffusion_models.utils import preprocess_canny
 
 from config import configs_dict
 from models import device, num_workers, load_blip_models
-from utils import NSD_dir_path, NSD_saved_dir_path, sam2_ckpt_dir_path
-from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs
+from utils import NSD_dir_path, run_files_path, nsd_subject_saved_dir_path, sam2_ckpt_dir_path
+from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, get_file_size, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false' 
 
@@ -39,12 +39,11 @@ class Dataset_for_BLIPs(Dataset):
         return len(self.path_dict)
                  
 
-
 class NSD_DATA():
     def __init__(self, NSD_dir_path : str = NSD_dir_path, subj_id : int | str = None) -> None:
         super().__init__()
         # subj_id
-        self.subj = ''.join(['subj0', str(subj_id)])
+        self.subj = f'subj{str(subj_id).zfill(2)}'
         
         ## nsddata
         self.nsddata_dir_path = join_paths(NSD_dir_path, 'nsddata')
@@ -76,8 +75,7 @@ class NSD_DATA():
         self.coco_annotation_dir_path = join_paths(NSD_dir_path, 'nsddata_stimuli', 'stimuli', 'nsd', 'annotations')
 
         ## saved path of this subject
-        self.subject_saved_dir_path = join_paths(NSD_saved_dir_path, self.subj)
-        check_and_make_dirs(self.subject_saved_dir_path)
+        self.subject_saved_dir_path = nsd_subject_saved_dir_path
 
     
     def read_behav_responses_tsv(self) -> pd.core.frame.DataFrame:
@@ -406,12 +404,13 @@ class NSD_DATA():
                         area_of_each_category = defaultdict(float) 
                         for category in category_list:
                             area_of_each_category[category['name']] += category['area']  
-                        subject = max(area_of_each_category, key=lambda k: area_of_each_category[k])
+                        selected_category = max(area_of_each_category, key=lambda k: area_of_each_category[k])
                         # save the strings to json file
                         json_data = {
                             'coco_captions' : captions_list, # list[str]
                             'coco_category' : category_list, # list[dict[str, any]]
-                            'selected_category' : subject,   # str
+                            'selected_category' : selected_category,   # str
+                            'category_string' : category_string # str
                         }
                         write_json_file(path=strings_path, data=json_data)
                 
@@ -460,7 +459,7 @@ class NSD_DATA():
             blip2t5_model, blip2t5_vis_processors, _ = load_blip_models(mode='caption') 
 
             batch_size = 12
-            prompt = 'Please provide a detailed description of this image, including all visible elements such as objects, people, settings, actions, colors, and emotions, and please do not generate repetitive statements.'
+            prompt = configs_dict['blip_caption']['prompt']
             dataset_queue, tag_queue, saved_path_queue, number_queue = [], [], [], []
             if not need_caption_test:
                 dataset_queue.append(Dataset_for_BLIPs(path_dict=path_dict['test'],  vis_processors=blip2t5_vis_processors['eval']))
@@ -492,63 +491,103 @@ class NSD_DATA():
         ## Generate embedding for each pair
         blipdiffusion_generated_embeddings_of_train_set_path = join_paths(blips_output_dir_path, 'blipdiffusion_generated_embeddings_of_train.hdf5')
         blipdiffusion_generated_embeddings_of_test_set_path  = join_paths(blips_output_dir_path, 'blipdiffusion_generated_embeddings_of_test.hdf5')
-        need_embedding_train = (  
-            os.path.exists(blipdiffusion_generated_embeddings_of_train_set_path) and  
-            len(h5py.File(blipdiffusion_generated_embeddings_of_train_set_path, 'r').keys()) == num_train  
-        )
-        need_embedding_test = (  
-            os.path.exists(blipdiffusion_generated_embeddings_of_test_set_path) and  
-            len(h5py.File(blipdiffusion_generated_embeddings_of_test_set_path, 'r').keys()) == num_test  
-        )
 
-        # # Load blip2 model
-        # blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode='diffusion')
-        # # save_uncond_embedding
-        # uncond_embedding = blip_diffusion_model.generate_uncond_embedding(neg_prompt=configs_dict['blip_diffusion']['negative_prompt'])
-        # uncond_embedding = uncond_embedding.cpu().numpy()
-        # np.save(join_paths(blips_output_dir_path, 'uncond_embedding.npy'), uncond_embedding)
-        # assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} is not (1, 77, 768).'
-      
-        
-        # # output_text = blip2t5_model.generate({'image' : blip2t5_vis_processors['eval'](image_rgb).unsqueeze(0).to(device),
-        # #                                       'prompt' : prompt},
-        # #                                     max_length=300, min_length=20,
-        # #                                 )[0]
-        # caption = [category_count_string, output_text]
-        # # Add image and caption to sample
-        # sample = {}
-        # sample['cond_images'] = bd_vis_processors['eval'](image_rgb).unsqueeze(0).to(device)
-        # sample['prompt'] = caption
-                    
-        # subject = [bd_txt_processors['eval'](subject)]
-        # sample['cond_subject'] = subject
-        # sample['tgt_subject']  = subject
+        def __check_hdf5_file__(path : str, target_length : int) -> bool:
+            if os.path.exists(path):
+                try:
+                    with h5py.File(path, 'r') as hdf5_file:
+                        if len(hdf5_file.keys()) == target_length:
+                            return True
+                except Exception as e:
+                    os.remove(path)
+            return False
 
-        # # Extract the embedding and save it as a npy file
-        # hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
-        # assert hidden_states.shape == (1, 77, 768), f'In {saved_path}, embedding shape is {hidden_states.shape}, not (1, 77, 768).'
-        # assert causal_attention_mask.shape == (1, 1, 77, 77), f'In {saved_path}, causal_attention_mask shape is {causal_attention_mask.shape}, not (1, 1, 77, 77).'
-        # hidden_states = hidden_states.cpu().numpy()
-        # causal_attention_mask = causal_attention_mask.cpu().numpy()
-        # np.save(join_paths(saved_path, 'hidden_states.npy'), hidden_states)
-        # np.save(join_paths(saved_path, 'causal_attention_mask.npy'), causal_attention_mask)
+        need_embedding_train = __check_hdf5_file__(path=blipdiffusion_generated_embeddings_of_train_set_path, target_length=num_train)
+        need_embedding_test  = __check_hdf5_file__(path=blipdiffusion_generated_embeddings_of_test_set_path , target_length=num_test)
+        uncond_embedding_path = join_paths(blips_output_dir_path, 'uncond_embedding.npy')
+        causal_attention_mask_path = join_paths(blips_output_dir_path, 'causal_attention_mask.npy')
+        all_strings_train_path = join_paths(self.subject_saved_dir_path,f'all_strings_path_in_train.json')
+        all_strings_test_path  = join_paths(self.subject_saved_dir_path,f'all_strings_path_in_test.json')
+        run_files_dict = {
+            'train' : {
+                'hdf5' : blipdiffusion_generated_embeddings_of_train_set_path,
+                'json' : all_strings_train_path
+            },
+            'test'  : {
+                'hdf5' : blipdiffusion_generated_embeddings_of_test_set_path,
+                'json' : all_strings_test_path
+            },
+            'uncond_embedding_path' : uncond_embedding_path,
+            'causal_attention_mask_path' : causal_attention_mask_path
+        }
+        write_json_file(path=run_files_path, data=run_files_dict)
 
+        if not (need_embedding_train and need_embedding_test):
+            # Load blip2 model
+            blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode='diffusion')
+            # save_uncond_embedding
+            uncond_embedding = blip_diffusion_model.generate_uncond_embedding(neg_prompt=configs_dict['blip_diffusion']['negative_prompt'])
+            uncond_embedding = uncond_embedding.cpu().numpy()
+            np.save(uncond_embedding_path, uncond_embedding)
+            assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} is not (1, 77, 768).'
 
-        # # check if all causal_attention_mask are the same
-        # causal_attention_mask_paths_list = []
-        # get_all_dirs = lambda path: [join_paths(path, x) for x in os.listdir(path)]
-        # for dir_path in get_all_dirs(train_saved_dir_path)+get_all_dirs(test_saved_dir_path):
-        #     for files in os.listdir(dir_path):
-        #         if files == 'causal_attention_mask.npy':
-        #             causal_attention_mask_paths_list.append(join_paths(dir_path, files))
-        # assert len(causal_attention_mask_paths_list) > 0, f'No causal_attention_mask found in {train_saved_dir_path} and {test_saved_dir_path}.'
-        # reference_array = np.load(causal_attention_mask_paths_list[0], allow_pickle=True)
-        # for file_path in tqdm(causal_attention_mask_paths_list[1:], desc='Checking causal_attention_mask', leave=True):
-        #     current_array = np.load(file_path, allow_pickle=True) 
-        #     assert np.array_equal(reference_array, current_array), f'In {file_path}, causal_attention_mask is not equal to the reference array.'
-        # np.save(join_paths(self.subject_saved_dir_path, 'causal_attention_mask.npy'), reference_array)
-        # for file_path in causal_attention_mask_paths_list:
-        #     os.remove(file_path)
+            files_queue, tag_queue, hdf5_path_queue, captions_queue, json_path_queue = [], [], [], [], []
+            if not need_embedding_test:
+                files_queue.append(path_dict['test'])
+                tag_queue.append('Test')
+                hdf5_path_queue.append(blipdiffusion_generated_embeddings_of_test_set_path)
+                captions_queue.append(read_json_file(blip2t5_generated_captions_of_test_set_path))
+                json_path_queue.append(all_strings_test_path)
+            if not need_embedding_train:
+                files_queue.append(path_dict['train'])
+                tag_queue.append('Train')
+                hdf5_path_queue.append(blipdiffusion_generated_embeddings_of_train_set_path)
+                captions_queue.append(read_json_file(blip2t5_generated_captions_of_train_set_path))
+                json_path_queue.append(all_strings_train_path)
+            for files, tag, hdf5_path, captions, json_path in zip(files_queue, tag_queue, hdf5_path_queue, captions_queue, json_path_queue):
+                captions = {int(k) : v for k, v in captions.items()} 
+                all_strings_path = {} # {index : path}
+                with h5py.File(hdf5_path, 'w') as hdf5_file:
+                    for index, files_dict in tqdm(files.items(), desc=f'{tag} set', leave=True):
+                        hdf5_group = hdf5_file.create_group(name=str(index))
+                        image_rgb = Image.open(files_dict['image']).convert('RGB')
+                        _, fmri = read_nii_file(files_dict['fmri'])
+                        strings_path = files_dict['strings']
+                        strings = read_json_file(strings_path)
+                        caption = captions[index]
+                        strings['blip_caption'] = caption
+                        write_json_file(path=strings_path, data=strings)
+                        all_strings_path[index] = strings_path
+                        category_string = strings['category_string']
+                        selected_category = strings['selected_category']
+
+                        cond_image = bd_vis_processors['eval'](image_rgb).unsqueeze(0).to(device)
+                        caption = bd_txt_processors['eval'](caption)
+                        category_string = bd_txt_processors['eval'](category_string)
+                        selected_category = bd_txt_processors['eval'](selected_category)
+                        sample = {
+                            'cond_images'  : cond_image,
+                            'prompt'       : [category_string, caption],
+                            'cond_subject' : [selected_category],
+                            'tgt_subject'  : [selected_category]
+                        }
+                        hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
+                        assert hidden_states.shape == (1, 77, 768), f'embedding shape is {hidden_states.shape}, not (1, 77, 768).'
+                        assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask shape is {causal_attention_mask.shape}, not (1, 1, 77, 77).'
+                        hidden_states = hidden_states.cpu().numpy()
+                        causal_attention_mask = causal_attention_mask.cpu().numpy()
+                        if not os.path.exists(causal_attention_mask_path):
+                            np.save(file=causal_attention_mask_path, arr=causal_attention_mask)
+                        image = np.array(image_rgb)
+                        for name, data in zip(['image', 'fmri', 'hidden_states'], 
+                                              [ image ,  fmri ,  hidden_states ]): # shape: (425, 425, 3),(145, 186, 148),(1, 77, 768)
+                            hdf5_dataset = hdf5_group.create_dataset(name=name, shape=data.shape, dtype=data.dtype)
+                            hdf5_dataset[:] = data
+                write_json_file(path=json_path, data=all_strings_path)        
+                print(f'{hdf5_path} is created, the size of it is {get_file_size(hdf5_path)}')
+
+            # Delete the loaded model
+            del blip_diffusion_model, bd_vis_processors, bd_txt_processors   
 
         # ## Load SAM2 model
         # checkpoint = join_paths(sam2_ckpt_dir_path, 'sam2_hiera_large.pt')
