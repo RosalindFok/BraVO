@@ -52,7 +52,7 @@ def get_GPU_memory_usage() -> tuple[float, float]:
 def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Module, dict, dict]:
     from lavis.models import load_model_and_preprocess
     start_time = time.time()
-    if mode == 'encoder':
+    if mode == 'feature':
         model, vis_processors, txt_processors = load_model_and_preprocess(
                 name='blip2_feature_extractor', # class Blip2Qformer(Blip2Base)
                 model_type='coco', 
@@ -96,16 +96,20 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
 ########################
 ######Brain Decoder#####
 ######################## 
+
+# text max = 0.18495534360408783, min = -0.14889132976531982
 class Conv_Twice(nn.Module):
     def __init__(self, in_channels : int, out_channels : int, kernel_size : int = 3) -> None:
         super().__init__()
         self.convs = nn.Sequential(
             nn.Conv1d(in_channels=in_channels , out_channels=out_channels, kernel_size=kernel_size, padding=(kernel_size - 1)//2), # stride = 1
-            nn.BatchNorm1d(out_channels),
-            nn.Hardtanh(min_val=-3, max_val=3),
+            # nn.BatchNorm1d(out_channels),
+            # nn.Hardtanh(min_val=-0.15, max_val=0.185),
+            nn.Tanh(),
             nn.Conv1d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, padding=(kernel_size - 1)//2), # stride = 1
-            nn.BatchNorm1d(out_channels),
-            nn.Hardtanh(min_val=-3, max_val=3)
+            # nn.BatchNorm1d(out_channels),
+            # nn.Hardtanh(min_val=-0.15, max_val=0.185)
+            nn.Tanh(),
         )
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         x = self.convs(x)
@@ -142,7 +146,7 @@ class Caption_Decoder(nn.Module):
     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
         super().__init__()
         self.input_layer = nn.Conv1d(in_channels=input_shape[0], out_channels=128, kernel_size=3, padding=1)
-        self.input_bn = nn.BatchNorm1d(128) 
+        # self.input_bn = nn.BatchNorm1d(128) 
         self.dw1 = Down(in_channels=128, out_channels=256)
         self.dw2 = Down(in_channels=256, out_channels=512)
         self.dw3 = Down(in_channels=512, out_channels=1024)
@@ -153,11 +157,12 @@ class Caption_Decoder(nn.Module):
         self.up2 = Up(in_channels=1024, out_channels=512)
         self.up3 = Up(in_channels=512, out_channels=256)
         self.up4 = Up(in_channels=256, out_channels=128)
-        self.output_layer = nn.Conv1d(in_channels=128, out_channels=output_shape[0], kernel_size=3, padding=1)
+        self.output_layer = nn.Conv1d(in_channels=128, out_channels=output_shape[0], kernel_size=1, padding=0)
+        self.hardtanh = nn.Hardtanh(min_val=-0.15, max_val=0.185)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:  
+    def forward(self, x: torch.Tensor) -> torch.Tensor: 
         # Encoder
-        x1 = self.input_bn(self.input_layer(x))
+        x1 = self.input_layer(x)
         x2 = self.dw1(x1)
         x3 = self.dw2(x2)
         x4 = self.dw3(x3)
@@ -176,7 +181,7 @@ class Caption_Decoder(nn.Module):
 
         # Output
         y = self.output_layer(y1)
-
+        y = self.hardtanh(y)
         return y
 
 

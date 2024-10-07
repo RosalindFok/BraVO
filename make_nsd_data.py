@@ -564,10 +564,12 @@ class NSD_DATA():
                         cond_image = bd_vis_processors['eval'](image_rgb).unsqueeze(0).to(device)
                         caption = bd_txt_processors['eval'](caption)
                         category_string = bd_txt_processors['eval'](category_string)
+                        coco_captions = [bd_txt_processors['eval'](x) for x in strings['coco_captions']]
                         selected_category = bd_txt_processors['eval'](selected_category)
                         sample = {
                             'cond_images'  : cond_image,
-                            'prompt'       : [category_string, caption],
+                            # TODO change the prompt
+                            'prompt'       : [category_string, caption], # coco_captions; [category_string, caption]
                             'cond_subject' : [selected_category],
                             'tgt_subject'  : [selected_category]
                         }

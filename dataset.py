@@ -104,8 +104,7 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
         if os.path.exists(all_done_path):
             continue
         # load blip model
-        blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode = 'diffusion')
-        prompt =  [bd_txt_processors['eval']('')]   
+        blip2_feature_extractor, bfe_vis_processors, _ = load_blip_models(mode = 'feature')
         # In json, index:string_path
         strings_path = read_json_file(json_path)
         # In hdf5, index:{image ,  fmri ,  hidden_states ,  causal_attention_mask}
@@ -131,6 +130,7 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
                 # mask fmri -> embedding
                 fmri_data = file[index]['fmri'][:]
                 masked_fmri = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
+                np.save(file=join_paths(idx_dir_path, 'original_masked_fmri.npy'), arr=masked_fmri)
                 min_val, max_val = masked_fmri.min(), masked_fmri.max()
                 masked_fmri = (masked_fmri - min_val) / (max_val - min_val) # to 0~1
                 masked_fmri = (masked_fmri*uint8_max).astype(np.uint8) # to 0~255
@@ -143,23 +143,18 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
                 masked_fmri = masked_fmri.repeat(3, axis=0) # (1, a, b) -> (3, a, b)
                 masked_fmri = np.transpose(masked_fmri, (1, 2, 0)) # (3, a, b) -> (a, b, 3)
                 masked_fmri = Image.fromarray(masked_fmri)
-                masked_fmri = bd_vis_processors['eval'](masked_fmri).cpu().numpy()
+                masked_fmri = bfe_vis_processors['eval'](masked_fmri).cpu().numpy()
                 masked_fmri = torch.from_numpy(masked_fmri).unsqueeze(0).to(device)
-                sample = {
-                    'cond_images' : masked_fmri,
-                    'prompt' : prompt,
-                    'cond_subject' : 'fMRI',
-                    'tgt_subject'  : 'natural scenes image'
-                }     
-                masked_embedding, _ = blip_diffusion_model.generate_embedding(samples=sample) 
-                masked_embedding = masked_embedding[-1].squeeze().cpu().numpy()
+                masked_embedding = blip2_feature_extractor.extract_features({'image' : masked_fmri}, mode='image').image_embeds # (1, 32, 768)
+                assert masked_embedding.shape == (1, 32, 768), f'{masked_embedding.shape} != (1, 32, 768)'
+                masked_embedding = masked_embedding[-1].squeeze().cpu().numpy() # (32, 768)
                 np.save(file=join_paths(idx_dir_path, 'blip_masked_embedding.npy'), arr=masked_embedding)
                 # Done flag
                 with open(done_path, 'w') as f:
                     f.write('Done')
 
         # delete the loaded models
-        del blip_diffusion_model, bd_vis_processors, bd_txt_processors
+        del blip2_feature_extractor, bfe_vis_processors
         torch.cuda.empty_cache()
         gc.collect() 
 
@@ -168,7 +163,10 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
     
     return uncond_embedding_path, causal_attention_mask_path, regions_saved_dir_path
 
-DataPoint = namedtuple('DataPoint', ['index', 'image', 'blip_masked_embedding', 'hidden_states_image', 'hidden_states_caption', 'strings_json_path'])  
+DataPoint = namedtuple('DataPoint', ['index', 'image', 'blip_masked_embedding', 'hidden_states_image',
+                                     'hidden_states_caption_fixed', 'hidden_states_caption_variable', 
+                                     'strings_json_path'
+                                    ])  
 class NSD_Dataset(Dataset):
     """
     load proprocessed data from hdf5 file
@@ -184,20 +182,35 @@ class NSD_Dataset(Dataset):
         text_embedding = np.concatenate((array_1, arrayr_3), axis=0)
         return image_embedding, text_embedding
 
+    def __split_caption_embedding__(self, array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        assert array.shape == (61, 768), f'{array.shape} != (61, 768)'
+        array_0 = array[0]
+        array_1 = array[1]
+        array_60 = array[60]
+        array_fixed = np.stack([array_0, array_1, array_60], axis=0)
+        array_variable = array[2:60]
+        return array_fixed, array_variable
+        
     def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, str]:
         dir_path = self.dirs[index]
         image = np.array(Image.open(os.path.join(dir_path, 'coco_image.png')))
         blip_hidden_states = np.load(os.path.join(dir_path, 'blip_hidden_states.npy'), allow_pickle=True)
         hidden_states_image, hidden_states_caption = self.__split_and_concat__(np.squeeze(blip_hidden_states))
+        hidden_states_caption_fixed, hidden_states_caption_variable = self.__split_caption_embedding__(hidden_states_caption)
         blip_masked_embedding = np.squeeze(np.load(os.path.join(dir_path, 'blip_masked_embedding.npy'), allow_pickle=True))
+        
+        blip_masked_embedding, _ = self.__split_and_concat__(blip_masked_embedding)
+        
         strings_json_path = os.path.join(dir_path, 'strings.json')
 
         image = torch.tensor(image, dtype=torch.float32)                                 # (425, 425, 3)
         blip_masked_embedding = torch.tensor(blip_masked_embedding, dtype=torch.float32) # (77, 768)
         hidden_states_image = torch.tensor(hidden_states_image, dtype=torch.float32)     # (16, 768)
-        hidden_states_caption = torch.tensor(hidden_states_caption, dtype=torch.float32) # (61, 768)
-        
-        return DataPoint(index, image, blip_masked_embedding, hidden_states_image, hidden_states_caption, strings_json_path)
+        hidden_states_caption_fixed = torch.tensor(hidden_states_caption_fixed, dtype=torch.float32) # (3, 768)
+        hidden_states_caption_variable = torch.tensor(hidden_states_caption_variable, dtype=torch.float32) # (58, 768)
+
+        return DataPoint(index, image, blip_masked_embedding, hidden_states_image, hidden_states_caption_fixed, 
+                         hidden_states_caption_variable, strings_json_path)
 
     def __len__(self) -> int:
         return len(self.dirs)

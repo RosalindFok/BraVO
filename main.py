@@ -40,7 +40,7 @@ def train(
             target_embedding = batches.hidden_states_image.to(device)
         elif tower_name in ['text', 't', 'caption', 'c']:
             input_embedding = batches.blip_masked_embedding.to(device)
-            target_embedding = batches.hidden_states_caption.to(device)
+            target_embedding = batches.hidden_states_caption_variable.to(device)
         else:
             raise ValueError(f'tower_name={tower_name} is not supported')
         # Forward
@@ -67,6 +67,13 @@ def test(
 ) -> tuple[float, float]:
     """
     """
+    def __concat_caption_embedding__(array_fixed : np.ndarray, array_variable : np.ndarray) -> np.ndarray:
+        assert array_fixed.shape == (3, 768)
+        assert array_variable.shape == (58, 768)
+        array = np.concatenate((array_fixed[:-1], array_variable, array_fixed[-1].reshape(1, -1)), axis=0)
+        assert array.shape == (61, 768)
+        return array
+    
     get_mae_loss = lambda y_pred, y_true: float(np.mean(np.abs(y_pred-y_true)))
     get_mse_loss = lambda y_pred, y_true: float(np.mean((y_pred-y_true)**2))
     model.eval()
@@ -85,24 +92,29 @@ def test(
                 raise ValueError(f'tower_name={tower_name} is not supported')
             # Forward
             pred_embedding  = model(input_embedding)
-            # 
             index = index.cpu().numpy()
             pred_embedding = pred_embedding.cpu().numpy()
             hidden_states_image = batches.hidden_states_image.numpy()
-            hidden_states_caption = batches.hidden_states_caption.numpy()
+            hidden_states_caption_fixed = batches.hidden_states_caption_fixed.numpy()
+            hidden_states_caption_variable = batches.hidden_states_caption_variable.numpy()
             strings_json_paths = batches.strings_json_path
             image = batches.image.numpy()
-            for idx, pred_emb, img, hsi, hsc, strings_json_path in zip(index, pred_embedding, image, hidden_states_image, hidden_states_caption, strings_json_paths):
-                true_emb = hsi if tower_name in ['image', 'i'] else hsc
+            for idx, pred_emb, img, hsi, hsc_fix, hsc_var, strings_json_path in zip(
+                                                                        index, pred_embedding, image, 
+                                                                        hidden_states_image, 
+                                                                        hidden_states_caption_fixed, 
+                                                                        hidden_states_caption_variable, 
+                                                                        strings_json_paths):
+                true_emb = hsi if tower_name in ['image', 'i'] else hsc_var
                 save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
                 maeloss_dict[int(idx)] = get_mae_loss(pred_emb, true_emb)
                 mseloss_dict[int(idx)] = get_mse_loss(pred_emb, true_emb)
                 if saved_test_results_dir_path is not None:
                     saved_path = join_paths(saved_test_results_dir_path, str(idx))
                     check_and_make_dirs(saved_path)
-                    np.save(join_paths(saved_path, f'bravo{save_tag}'), pred_emb)
+                    np.save(join_paths(saved_path, f'bravo{save_tag}'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=pred_emb))
                     np.save(join_paths(saved_path, f'blip_img.npy'), hsi)
-                    np.save(join_paths(saved_path, f'blip_cap.npy'), hsc)
+                    np.save(join_paths(saved_path, f'blip_cap.npy'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=true_emb))
                     np.save(join_paths(saved_path, 'coco.npy'), img.astype(np.uint8))
                     strings = read_json_file(strings_json_path)
                     write_json_file(path=join_paths(saved_path, 'captions.json'), data={'blip' : strings['category_string'] + strings['blip_caption'] })
@@ -203,7 +215,7 @@ def main() -> None:
         test_dataloader  = DataLoader(dataset=NSD_Dataset(join_paths(regions_saved_dir_path, 'test')),  
                                       batch_size=batch_size, shuffle=False, num_workers=num_workers)
         # Loss function
-        decoder_loss = Decoder_loss(w1=1, w2=0.5, w3=0) 
+        decoder_loss = Decoder_loss(w1=1, w2=1, w3=0) 
         # Network
         light_loader = next(iter(test_dataloader))
         if tower_name in ['image', 'i']:
@@ -212,7 +224,7 @@ def main() -> None:
             decoder_model = Image_Decoder(input_shape=input_shape, output_shape=output_shape)
         elif tower_name in ['text', 't', 'caption', 'c']:
             input_shape  = light_loader.blip_masked_embedding.shape[1:] 
-            output_shape = light_loader.hidden_states_caption.shape[1:] 
+            output_shape = light_loader.hidden_states_caption_variable.shape[1:] 
             decoder_model = Caption_Decoder(input_shape=input_shape, output_shape=output_shape)
         print(f'Input Shape = {input_shape}, Output Shape = {output_shape}')
         trainable_parameters = sum(p.numel() for p in decoder_model.parameters() if p.requires_grad)
@@ -319,6 +331,7 @@ def main() -> None:
             bravo_cap = np.load(join_paths(dir_path, 'bravo_cap.npy'), allow_pickle=True)
             blip_img  = np.load(join_paths(dir_path, 'blip_img.npy' ), allow_pickle=True)
             blip_cap  = np.load(join_paths(dir_path, 'blip_cap.npy' ), allow_pickle=True)
+
             hidden_state_dict = {
                 'blip'    : __concatenate_embeddings__(img_emb=blip_img , txt_emb=blip_cap ),
                 'bravo' : __concatenate_embeddings__(img_emb=blip_img , txt_emb=bravo_cap),
