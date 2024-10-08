@@ -559,19 +559,14 @@ class NSD_DATA():
                         write_json_file(path=strings_path, data=strings)
                         all_strings_path[index] = strings_path
                         category_string = strings['category_string']
-                        selected_category = strings['selected_category']
 
                         cond_image = bd_vis_processors['eval'](image_rgb).unsqueeze(0).to(device)
-                        caption = bd_txt_processors['eval'](caption)
                         category_string = bd_txt_processors['eval'](category_string)
-                        coco_captions = [bd_txt_processors['eval'](x) for x in strings['coco_captions']]
-                        selected_category = bd_txt_processors['eval'](selected_category)
                         sample = {
                             'cond_images'  : cond_image,
-                            # TODO change the prompt
-                            'prompt'       : [category_string, caption], # coco_captions; [category_string, caption]
-                            'cond_subject' : [selected_category],
-                            'tgt_subject'  : [selected_category]
+                            'prompt'       : [bd_txt_processors['eval'](strings['category_string']+strings['blip_caption'])],
+                            'cond_subject' : category_string,
+                            'tgt_subject'  : category_string
                         }
                         hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
                         assert hidden_states.shape == (1, 77, 768), f'embedding shape is {hidden_states.shape}, not (1, 77, 768).'

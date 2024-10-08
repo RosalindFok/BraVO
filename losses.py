@@ -11,8 +11,9 @@ class Decoder_loss(nn.modules.loss._Loss):
         self.w3 = w3 # COS Loss
 
     def forward(self, input : torch.Tensor, target : torch.Tensor) -> torch.Tensor:
-        input = input.view(input.shape[0], -1)
-        target = target.view(target.shape[0], -1)
+        input = input.reshape(input.shape[0], -1)
+        target = target.reshape(target.shape[0], -1)
+        assert input.shape == target.shape, f'Input and target shapes do not match: {input.shape} vs {target.shape}'
         # Check input and target tensors
         assert not torch.isnan(input).any() and not torch.isinf(input).any(), f'Input tensor contains nan or inf values'
         assert not torch.isnan(target).any() and not torch.isinf(target).any(), f'Target tensor contains nan or inf values'

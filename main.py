@@ -1,5 +1,4 @@
 import os
-import re
 import time
 import torch
 import argparse
@@ -12,7 +11,7 @@ from torch.utils.data import DataLoader
 from losses import Decoder_loss
 from config import configs_dict
 from dataset import fetch_nsd_rois_and_labels, NSD_Dataset, make_nsd_dataset
-from models import device, devices_num, num_workers, load_blip_models, get_GPU_memory_usage, Image_Decoder, Caption_Decoder
+from models import device, devices_num, num_workers, get_GPU_memory_usage, Image_Decoder, Caption_Decoder, fMRI2Image
 from utils import join_paths, check_and_make_dirs, write_json_file, read_json_file, merge_dicts_if_no_conflict
 from utils import train_results_dir_path, test_results_dir_path, nsd_subject_saved_dir_path, fmrishape_subject_saved_dir_path
 
@@ -35,14 +34,20 @@ def train(
     tower_name = tower_name.lower()
     for batches in tqdm(dataloader, desc='Training', leave=True):
         # select the tower, load data to device and set the dtype as float32
-        if tower_name in ['image', 'i']:
-            input_embedding = batches.blip_masked_embedding.to(device)
-            target_embedding = batches.hidden_states_image.to(device)
-        elif tower_name in ['text', 't', 'caption', 'c']:
-            input_embedding = batches.blip_masked_embedding.to(device)
-            target_embedding = batches.hidden_states_caption_variable.to(device)
-        else:
-            raise ValueError(f'tower_name={tower_name} is not supported')
+        # if tower_name in ['image', 'i']:
+        #     input_embedding = batches.blip_masked_embedding.to(device)
+        #     target_embedding = batches.hidden_states_image.to(device)
+        # elif tower_name in ['text', 't', 'caption', 'c']:
+        #     input_embedding = batches.blip_masked_embedding.to(device)
+        #     target_embedding = batches.hidden_states_caption_variable.to(device)
+        # else:
+        #     raise ValueError(f'tower_name={tower_name} is not supported')
+
+        ### test
+        input_embedding = batches.original_masked_fmri.to(device)
+        target_embedding = batches.image.to(device)
+        ### test
+
         # Forward
         pred_embedding  = model(input_embedding)
         # Compute loss
@@ -83,41 +88,61 @@ def test(
         desc = 'Testing' if saved_test_results_dir_path is not None else 'Validating'
         for batches in tqdm(dataloader, desc=desc, leave=True):
             index = batches.index
-            # select the tower, load data to device and set the dtype as float32
-            if tower_name in ['image', 'i']:
-                input_embedding = batches.blip_masked_embedding.to(device)
-            elif tower_name in ['text', 't', 'caption', 'c']:
-                input_embedding = batches.blip_masked_embedding.to(device)
-            else:
-                raise ValueError(f'tower_name={tower_name} is not supported')
+            # # select the tower, load data to device and set the dtype as float32
+            # if tower_name in ['image', 'i']:
+            #     input_embedding = batches.blip_masked_embedding.to(device)
+            # elif tower_name in ['text', 't', 'caption', 'c']:
+            #     input_embedding = batches.blip_masked_embedding.to(device)
+            # else:
+            #     raise ValueError(f'tower_name={tower_name} is not supported')
+
+            ### test
+            input_embedding = batches.original_masked_fmri.to(device)
+            ### test
+
             # Forward
             pred_embedding  = model(input_embedding)
             index = index.cpu().numpy()
             pred_embedding = pred_embedding.cpu().numpy()
-            hidden_states_image = batches.hidden_states_image.numpy()
-            hidden_states_caption_fixed = batches.hidden_states_caption_fixed.numpy()
-            hidden_states_caption_variable = batches.hidden_states_caption_variable.numpy()
-            strings_json_paths = batches.strings_json_path
-            image = batches.image.numpy()
-            for idx, pred_emb, img, hsi, hsc_fix, hsc_var, strings_json_path in zip(
-                                                                        index, pred_embedding, image, 
-                                                                        hidden_states_image, 
-                                                                        hidden_states_caption_fixed, 
-                                                                        hidden_states_caption_variable, 
-                                                                        strings_json_paths):
-                true_emb = hsi if tower_name in ['image', 'i'] else hsc_var
-                save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
-                maeloss_dict[int(idx)] = get_mae_loss(pred_emb, true_emb)
-                mseloss_dict[int(idx)] = get_mse_loss(pred_emb, true_emb)
+
+            ### test
+            image = batches.image.cpu().numpy()
+            for idx, pred_emb, img in zip(index, pred_embedding, image):
+                maeloss_dict[int(idx)] = get_mae_loss(pred_emb, img)
+                mseloss_dict[int(idx)] = get_mse_loss(pred_emb, img)
                 if saved_test_results_dir_path is not None:
                     saved_path = join_paths(saved_test_results_dir_path, str(idx))
                     check_and_make_dirs(saved_path)
-                    np.save(join_paths(saved_path, f'bravo{save_tag}'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=pred_emb))
-                    np.save(join_paths(saved_path, f'blip_img.npy'), hsi)
-                    np.save(join_paths(saved_path, f'blip_cap.npy'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=true_emb))
-                    np.save(join_paths(saved_path, 'coco.npy'), img.astype(np.uint8))
-                    strings = read_json_file(strings_json_path)
-                    write_json_file(path=join_paths(saved_path, 'captions.json'), data={'blip' : strings['category_string'] + strings['blip_caption'] })
+                    pred_emb =  (((pred_emb-pred_emb.min())/(pred_emb.max()-pred_emb.min())) * 255).astype(np.uint8)
+                    img = (img * 255).astype(np.uint8)
+                    Image.fromarray(pred_emb).save(join_paths(saved_path, 'prediction.png'))
+                    Image.fromarray(img).save(join_paths(saved_path, 'groundtruth.png'))
+            ### test
+
+            # hidden_states_image = batches.hidden_states_image.numpy()
+            # hidden_states_caption_fixed = batches.hidden_states_caption_fixed.numpy()
+            # hidden_states_caption_variable = batches.hidden_states_caption_variable.numpy()
+            # strings_json_paths = batches.strings_json_path
+            # image = batches.image.numpy()
+            # for idx, pred_emb, img, hsi, hsc_fix, hsc_var, strings_json_path in zip(
+            #                                                             index, pred_embedding, image, 
+            #                                                             hidden_states_image, 
+            #                                                             hidden_states_caption_fixed, 
+            #                                                             hidden_states_caption_variable, 
+            #                                                             strings_json_paths):
+            #     true_emb = hsi if tower_name in ['image', 'i'] else hsc_var
+            #     save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
+            #     maeloss_dict[int(idx)] = get_mae_loss(pred_emb, true_emb)
+            #     mseloss_dict[int(idx)] = get_mse_loss(pred_emb, true_emb)
+            #     if saved_test_results_dir_path is not None:
+            #         saved_path = join_paths(saved_test_results_dir_path, str(idx))
+            #         check_and_make_dirs(saved_path)
+            #         np.save(join_paths(saved_path, f'bravo{save_tag}'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=pred_emb))
+            #         np.save(join_paths(saved_path, f'blip_img.npy'), hsi)
+            #         np.save(join_paths(saved_path, f'blip_cap.npy'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=true_emb))
+            #         np.save(join_paths(saved_path, 'coco.npy'), img.astype(np.uint8))
+            #         strings = read_json_file(strings_json_path)
+            #         write_json_file(path=join_paths(saved_path, 'captions.json'), data={'blip' : strings['category_string'] + strings['blip_caption'] })
 
     # Save the MAE and MSE loss
     avg_maeloss = sum([value for value in maeloss_dict.values()])/len(maeloss_dict)
@@ -218,14 +243,21 @@ def main() -> None:
         decoder_loss = Decoder_loss(w1=1, w2=1, w3=0) 
         # Network
         light_loader = next(iter(test_dataloader))
-        if tower_name in ['image', 'i']:
-            input_shape  = light_loader.blip_masked_embedding.shape[1:] 
-            output_shape = light_loader.hidden_states_image.shape[1:] 
-            decoder_model = Image_Decoder(input_shape=input_shape, output_shape=output_shape)
-        elif tower_name in ['text', 't', 'caption', 'c']:
-            input_shape  = light_loader.blip_masked_embedding.shape[1:] 
-            output_shape = light_loader.hidden_states_caption_variable.shape[1:] 
-            decoder_model = Caption_Decoder(input_shape=input_shape, output_shape=output_shape)
+        
+        ### test
+        input_shape = light_loader.original_masked_fmri.shape[1:] 
+        output_shape = light_loader.image.shape[1:] 
+        decoder_model = fMRI2Image(input_shape=input_shape, output_shape=output_shape)
+        ### test
+
+        # if tower_name in ['image', 'i']:
+        #     input_shape  = light_loader.blip_masked_embedding.shape[1:] 
+        #     output_shape = light_loader.hidden_states_image.shape[1:] 
+        #     decoder_model = Image_Decoder(input_shape=input_shape, output_shape=output_shape)
+        # elif tower_name in ['text', 't', 'caption', 'c']:
+        #     input_shape  = light_loader.blip_masked_embedding.shape[1:] 
+        #     output_shape = light_loader.hidden_states_caption_variable.shape[1:] 
+        #     decoder_model = Caption_Decoder(input_shape=input_shape, output_shape=output_shape)
         print(f'Input Shape = {input_shape}, Output Shape = {output_shape}')
         trainable_parameters = sum(p.numel() for p in decoder_model.parameters() if p.requires_grad)
         decoder_model = decoder_model.to(device=device)
@@ -286,6 +318,7 @@ def main() -> None:
     
     # Generate
     elif task == 'g':   
+        from models import load_blip_models
         def __concatenate_embeddings__(img_emb : np.ndarray, txt_emb : np.ndarray) -> np.ndarray:
             assert img_emb.shape == (16, 768), f'img_emb={img_emb.shape} should be (16, 768)'
             assert txt_emb.shape == (61, 768), f'txt_emb={txt_emb.shape} should be (61, 768)'
@@ -333,7 +366,7 @@ def main() -> None:
             blip_cap  = np.load(join_paths(dir_path, 'blip_cap.npy' ), allow_pickle=True)
 
             hidden_state_dict = {
-                'blip'    : __concatenate_embeddings__(img_emb=blip_img , txt_emb=blip_cap ),
+                'blip'    : __concatenate_embeddings__(img_emb=blip_img , txt_emb=blip_cap),
                 'bravo' : __concatenate_embeddings__(img_emb=blip_img , txt_emb=bravo_cap),
                 # 'image'   : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=blip_cap ),
                 # 'img+cap' : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=bravo_cap)

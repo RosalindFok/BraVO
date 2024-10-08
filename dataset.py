@@ -163,9 +163,9 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
     
     return uncond_embedding_path, causal_attention_mask_path, regions_saved_dir_path
 
-DataPoint = namedtuple('DataPoint', ['index', 'image', 'blip_masked_embedding', 'hidden_states_image',
-                                     'hidden_states_caption_fixed', 'hidden_states_caption_variable', 
-                                     'strings_json_path'
+DataPoint = namedtuple('DataPoint', ['index', 'image', 'blip_masked_embedding', 'original_masked_fmri',
+                                     'hidden_states_image', 'hidden_states_caption_fixed', 
+                                     'hidden_states_caption_variable', 'strings_json_path'
                                     ])  
 class NSD_Dataset(Dataset):
     """
@@ -193,14 +193,12 @@ class NSD_Dataset(Dataset):
         
     def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, str]:
         dir_path = self.dirs[index]
-        image = np.array(Image.open(os.path.join(dir_path, 'coco_image.png')))
+        image = np.array(Image.open(os.path.join(dir_path, 'coco_image.png')).convert('L'))
         blip_hidden_states = np.load(os.path.join(dir_path, 'blip_hidden_states.npy'), allow_pickle=True)
         hidden_states_image, hidden_states_caption = self.__split_and_concat__(np.squeeze(blip_hidden_states))
         hidden_states_caption_fixed, hidden_states_caption_variable = self.__split_caption_embedding__(hidden_states_caption)
         blip_masked_embedding = np.squeeze(np.load(os.path.join(dir_path, 'blip_masked_embedding.npy'), allow_pickle=True))
-        
-        blip_masked_embedding, _ = self.__split_and_concat__(blip_masked_embedding)
-        
+        original_masked_fmri = np.load(os.path.join(dir_path, 'original_masked_fmri.npy'), allow_pickle=True)
         strings_json_path = os.path.join(dir_path, 'strings.json')
 
         image = torch.tensor(image, dtype=torch.float32)                                 # (425, 425, 3)
@@ -208,9 +206,15 @@ class NSD_Dataset(Dataset):
         hidden_states_image = torch.tensor(hidden_states_image, dtype=torch.float32)     # (16, 768)
         hidden_states_caption_fixed = torch.tensor(hidden_states_caption_fixed, dtype=torch.float32) # (3, 768)
         hidden_states_caption_variable = torch.tensor(hidden_states_caption_variable, dtype=torch.float32) # (58, 768)
+        original_masked_fmri = torch.tensor(original_masked_fmri, dtype=torch.float32) # (K,)
 
-        return DataPoint(index, image, blip_masked_embedding, hidden_states_image, hidden_states_caption_fixed, 
-                         hidden_states_caption_variable, strings_json_path)
+        # test
+        original_masked_fmri = (original_masked_fmri - original_masked_fmri.min())/(original_masked_fmri.max()-original_masked_fmri.min())
+        image = (image - image.min())/(image.max()-image.min())
+        # test
+
+        return DataPoint(index, image, blip_masked_embedding, original_masked_fmri, hidden_states_image, 
+                         hidden_states_caption_fixed, hidden_states_caption_variable, strings_json_path)
 
     def __len__(self) -> int:
         return len(self.dirs)

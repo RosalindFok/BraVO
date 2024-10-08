@@ -104,12 +104,12 @@ class Conv_Twice(nn.Module):
         self.convs = nn.Sequential(
             nn.Conv1d(in_channels=in_channels , out_channels=out_channels, kernel_size=kernel_size, padding=(kernel_size - 1)//2), # stride = 1
             # nn.BatchNorm1d(out_channels),
-            # nn.Hardtanh(min_val=-0.15, max_val=0.185),
-            nn.Tanh(),
+            nn.Hardtanh(min_val=-0.15, max_val=0.185),
+            # nn.Tanh(),
             nn.Conv1d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, padding=(kernel_size - 1)//2), # stride = 1
             # nn.BatchNorm1d(out_channels),
-            # nn.Hardtanh(min_val=-0.15, max_val=0.185)
-            nn.Tanh(),
+            nn.Hardtanh(min_val=-0.15, max_val=0.185)
+            # nn.Tanh(),
         )
     def forward(self, x : torch.Tensor) -> torch.Tensor:
         x = self.convs(x)
@@ -183,7 +183,6 @@ class Caption_Decoder(nn.Module):
         y = self.output_layer(y1)
         y = self.hardtanh(y)
         return y
-
 
 class Image_Decoder(nn.Module):
     """
