@@ -92,12 +92,12 @@ class CtxCLIPTextModel_stage_1(CLIPPreTrainedModel):
         ctx_begin_pos: list,
         input_ids: Optional[torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        hidden_states, causal_attention_mask = self.text_model(
+        hidden_states, position_embeddings, causal_attention_mask = self.text_model(
             ctx_embeddings=ctx_embeddings,
             ctx_begin_pos=ctx_begin_pos,
             input_ids=input_ids,
         )
-        return hidden_states, causal_attention_mask
+        return hidden_states, position_embeddings, causal_attention_mask
 
 class CtxCLIPTextModel_stage_2(CLIPPreTrainedModel):
     config_class = CLIPTextConfig
@@ -254,11 +254,12 @@ class CtxCLIPTextTransformer_stage_1(nn.Module):
         input_shape = input_ids.size()
         input_ids = input_ids.view(-1, input_shape[-1])
 
-        # hidden_states.shape = [bs, 77, 768]
-        hidden_states = self.embeddings(
+        # hidden_states.shape = [bs, 77, 768], position_embeddings.shape = [bs, 77, 768]
+        hidden_states, position_embeddings = self.embeddings(
             input_ids=input_ids, # torch.Tensor
             ctx_embeddings=ctx_embeddings, # torch.Tensor
-            ctx_begin_pos=ctx_begin_pos, # list
+            ctx_begin_pos=ctx_begin_pos, # list [2]
+            return_position_embeddings=True,
         )
 
         bsz, seq_len = input_shape
@@ -266,7 +267,7 @@ class CtxCLIPTextTransformer_stage_1(nn.Module):
         # CLIP's text model uses causal mask, prepare it here.
         # https://github.com/openai/CLIP/blob/cfcffb90e69f37bf2ff1e988237a0fbe41f33c04/clip/model.py#L324
         causal_attention_mask = __build_causal_attention_mask__(bsz, seq_len, hidden_states.dtype).to(hidden_states.device)
-        return hidden_states, causal_attention_mask
+        return hidden_states, position_embeddings, causal_attention_mask
 
 class CtxCLIPTextTransformer_stage_2(nn.Module):
     def __init__(self, config: CLIPTextConfig):
@@ -304,7 +305,6 @@ class CtxCLIPTextTransformer_stage_2(nn.Module):
         #     # hidden_states=encoder_outputs.hidden_states, # None
         #     # attentions=encoder_outputs.attentions, # None
         # )
-    
 ### BraVO
 
 
@@ -330,6 +330,7 @@ class CtxCLIPTextEmbeddings(nn.Module):
         input_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        return_position_embeddings : bool = False,
     ) -> torch.Tensor:
         if ctx_embeddings is None:
             ctx_len = 0
@@ -367,4 +368,7 @@ class CtxCLIPTextEmbeddings(nn.Module):
         position_embeddings = self.position_embedding(position_ids)
         embeddings = inputs_embeds + position_embeddings
 
-        return embeddings # [bs, 77, 768]
+        if return_position_embeddings:
+            return embeddings, position_embeddings # [bs, 77, 768], [bs, 77, 768]
+        else:
+            return embeddings # [bs, 77, 768]

@@ -611,13 +611,13 @@ class BlipDiffusion(BaseModel):
         tokenized_prompt = self._tokenize_text(prompt).to(self.device) # transformers.tokenization_utils_base.BatchEncoding, including 'input_ids' and 'attention_mask'
         text_ids = tokenized_prompt.input_ids
 
-        hidden_states, causal_attention_mask = self.text_encoder_stage_1(
+        hidden_states, position_embeddings, causal_attention_mask = self.text_encoder_stage_1(
             ctx_embeddings=image_embeddings,
             ctx_begin_pos=[self._CTX_BEGIN_POS],
             input_ids=text_ids
         )
 
-        return hidden_states, causal_attention_mask
+        return hidden_states, position_embeddings, causal_attention_mask
 
     @torch.no_grad()
     def generate_image_via_embedding(

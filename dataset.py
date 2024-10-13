@@ -11,7 +11,7 @@ from collections import namedtuple
 from torch.utils.data import Dataset
 
 from models import device, load_blip_models
-from utils import run_files_path, join_paths, read_nii_file, check_and_make_dirs, read_json_file, get_file_size
+from utils import run_files_path, join_paths, read_nii_file, check_and_make_dirs, read_json_file
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false' 
 
@@ -58,7 +58,7 @@ def fetch_nsd_rois_and_labels(subj_path : str, rois_setup : namedtuple) -> tuple
     return mask_data, thresholds, labels_string
 
 def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[int], labels_string : str
-                     ) -> tuple[any, any]:
+                     ) -> tuple[np.array, np.array, np.array, str]:
     def __masking_fmri_to_array__(fmri_data : np.ndarray, 
                               mask_data : np.ndarray, thresholds : list[int]) -> np.ndarray:
         """  
@@ -68,22 +68,6 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
         masked_data = fmri_data[mask_bool] if np.any(mask_bool) else None
         assert masked_data is not None, f'No voxels in thresholds={thresholds} found in mask_data.'
         return masked_data
-    
-    def __find_factors__(n : int) -> tuple[int, int]:
-        """
-        """
-        a = int(n**0.5)  
-        b = n // a  
-        min_diff = float('inf')  
-        best_a, best_b = a, b  
-        for i in range(a, 0, -1):  
-            if n % i == 0: 
-                j = n // i  
-                diff = abs(i - j)  
-                if diff < min_diff:  
-                    min_diff = diff  
-                    best_a, best_b = i, j  
-        return best_a, best_b
     
     regions_saved_dir_path = join_paths(subj_path, labels_string)
     check_and_make_dirs(regions_saved_dir_path)
@@ -95,7 +79,16 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
     test_hdf5_path  = run_files['test']['hdf5']
     test_json_path  = run_files['test']['json']
     uncond_embedding_path = run_files['uncond_embedding_path']
+    position_embeddings_path = run_files['position_embeddings_path']
     causal_attention_mask_path = run_files['causal_attention_mask_path']
+
+    uncond_embedding = np.load(uncond_embedding_path, allow_pickle=True)
+    assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} != (1, 77, 768)'
+    position_embedding = np.squeeze(np.load(position_embeddings_path, allow_pickle=True))
+    assert position_embedding.shape == (77, 768), f'position_embeddings.shape={position_embedding.shape} != (77, 768)'
+    causal_attention_mask = np.load(causal_attention_mask_path, allow_pickle=True)
+    assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask.shape={causal_attention_mask.shape} != (1, 1, 77, 77)'
+
     
     for tag, hdf5_path, json_path in zip(['test', 'train'], [test_hdf5_path, train_hdf5_path], [test_json_path, train_json_path]):
         set_saved_dir_path = join_paths(regions_saved_dir_path, tag)
@@ -109,7 +102,6 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
         strings_path = read_json_file(json_path)
         # In hdf5, index:{image ,  fmri ,  hidden_states ,  causal_attention_mask}
         uint8_max = np.iinfo(np.uint8).max
-        reshape_a, reshape_b = -99, -99
         with h5py.File(hdf5_path, 'r') as file:
             for index in tqdm(file, desc=f'process {tag}', leave=True):
                 # dir
@@ -122,33 +114,29 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
                 # strings
                 shutil.copy(src=strings_path[index], dst=join_paths(idx_dir_path, 'strings.json'))
                 # blip output
-                hidden_states = file[index]['hidden_states'][:]
-                np.save(file=join_paths(idx_dir_path, 'blip_hidden_states.npy'), arr=hidden_states)
+                hidden_states = np.squeeze(file[index]['hidden_states'][:]) # (77, 768)
+                assert hidden_states.shape == position_embedding.shape, f'hidden_states.shape={hidden_states.shape} != {position_embedding.shape}'
+                hidden_states_minus_position_embedding = hidden_states - position_embedding
+                np.save(file=join_paths(idx_dir_path, 'hidden_states_minus_position_embedding.npy'), arr=hidden_states_minus_position_embedding)
                 # coco image
                 image = file[index]['image'][:]
-                Image.fromarray(image).save(fp=join_paths(idx_dir_path, 'coco_image.png'))
+                Image.fromarray(image).save(join_paths(idx_dir_path, 'coco_image.png'))
                 # mask fmri -> embedding
                 fmri_data = file[index]['fmri'][:]
                 masked_fmri = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
-                np.save(file=join_paths(idx_dir_path, 'original_masked_fmri.npy'), arr=masked_fmri)
+                np.save(file=join_paths(idx_dir_path, 'masked_fmri.npy'), arr=masked_fmri)
                 min_val, max_val = masked_fmri.min(), masked_fmri.max()
                 masked_fmri = (masked_fmri - min_val) / (max_val - min_val) # to 0~1
                 masked_fmri = (masked_fmri*uint8_max).astype(np.uint8) # to 0~255
-                if max(reshape_a, reshape_b) <= 0:
-                    reshape_a, reshape_b = __find_factors__(masked_fmri.shape[0])
-                    if min(reshape_a, reshape_b) == 1:
-                        masked_fmri = np.append(masked_fmri, 0)
-                        reshape_a, reshape_b = __find_factors__(masked_fmri.shape[0])
-                masked_fmri = masked_fmri.reshape(1, reshape_a, reshape_b) # (K) -> (1, a, b)
-                masked_fmri = masked_fmri.repeat(3, axis=0) # (1, a, b) -> (3, a, b)
-                masked_fmri = np.transpose(masked_fmri, (1, 2, 0)) # (3, a, b) -> (a, b, 3)
+                masked_fmri = masked_fmri.reshape(1, masked_fmri.shape[0], 1) # (K) -> (1, K, 1)
+                masked_fmri = masked_fmri.repeat(3, axis=0) # (1, K, 1) -> (3, K, 1)
+                masked_fmri = np.transpose(masked_fmri, (1, 2, 0)) # (3, K, 1) -> (K, 1, 3)
                 masked_fmri = Image.fromarray(masked_fmri)
-                masked_fmri = bfe_vis_processors['eval'](masked_fmri).cpu().numpy()
-                masked_fmri = torch.from_numpy(masked_fmri).unsqueeze(0).to(device)
-                masked_embedding = blip2_feature_extractor.extract_features({'image' : masked_fmri}, mode='image').image_embeds # (1, 32, 768)
-                assert masked_embedding.shape == (1, 32, 768), f'{masked_embedding.shape} != (1, 32, 768)'
-                masked_embedding = masked_embedding[-1].squeeze().cpu().numpy() # (32, 768)
-                np.save(file=join_paths(idx_dir_path, 'blip_masked_embedding.npy'), arr=masked_embedding)
+                masked_fmri = bfe_vis_processors['eval'](masked_fmri).unsqueeze(0).to(device)
+                masked_fmri_embedding = blip2_feature_extractor.extract_features({'image' : masked_fmri}, mode='image').image_embeds # (1, 32, 768)
+                masked_fmri_embedding = masked_fmri_embedding.squeeze().cpu().numpy()
+                assert masked_fmri_embedding.shape == (32, 768), f'{masked_fmri_embedding.shape} != (32, 768)'
+                np.save(file=join_paths(idx_dir_path, 'masked_fmri_embedding.npy'), arr=masked_fmri_embedding)
                 # Done flag
                 with open(done_path, 'w') as f:
                     f.write('Done')
@@ -161,11 +149,12 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
         with open(all_done_path, 'w') as f:
             f.write('Done')
     
-    return uncond_embedding_path, causal_attention_mask_path, regions_saved_dir_path
+    return uncond_embedding, position_embedding, causal_attention_mask, regions_saved_dir_path
 
-DataPoint = namedtuple('DataPoint', ['index', 'image', 'blip_masked_embedding', 'original_masked_fmri',
-                                     'hidden_states_image', 'hidden_states_caption_fixed', 
-                                     'hidden_states_caption_variable', 'strings_json_path'
+DataPoint = namedtuple('DataPoint', ['index', 'coco_image', 'masked_fmri', 'masked_fmri_embedding',
+                                     'blip_image_embedding', 
+                                     'blip_caption_embedding_fixed', 'blip_caption_embedding_variable', 
+                                     'strings_json_path'
                                     ])  
 class NSD_Dataset(Dataset):
     """
@@ -177,9 +166,12 @@ class NSD_Dataset(Dataset):
         self.dirs = {int(d) : os.path.join(root_dir, d) for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))}
 
     def __split_and_concat__(self, array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        assert array.shape == (77, 768), f'{array.shape} != (77, 768)'
         array_1, array_2, arrayr_3 = np.split(array, [2, 18]) # BLIP decides, 77 = 2+16+59
         image_embedding = array_2
         text_embedding = np.concatenate((array_1, arrayr_3), axis=0)
+        assert image_embedding.shape == (16, 768), f'image_embedding.shape={image_embedding.shape} != (16, 768)'
+        assert text_embedding.shape == (61, 768), f'text_embedding.shape={text_embedding.shape} != (61, 768)'
         return image_embedding, text_embedding
 
     def __split_caption_embedding__(self, array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -189,32 +181,30 @@ class NSD_Dataset(Dataset):
         array_60 = array[60]
         array_fixed = np.stack([array_0, array_1, array_60], axis=0)
         array_variable = array[2:60]
+        assert array_fixed.shape == (3, 768), f'array_fixed.shape={array_fixed.shape} != (3, 768)'
+        assert array_variable.shape == (58, 768), f'array_variable.shape={array_variable.shape} != (58, 768)'
         return array_fixed, array_variable
         
     def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, str]:
         dir_path = self.dirs[index]
-        image = np.array(Image.open(os.path.join(dir_path, 'coco_image.png')).convert('L'))
-        blip_hidden_states = np.load(os.path.join(dir_path, 'blip_hidden_states.npy'), allow_pickle=True)
-        hidden_states_image, hidden_states_caption = self.__split_and_concat__(np.squeeze(blip_hidden_states))
-        hidden_states_caption_fixed, hidden_states_caption_variable = self.__split_caption_embedding__(hidden_states_caption)
-        blip_masked_embedding = np.squeeze(np.load(os.path.join(dir_path, 'blip_masked_embedding.npy'), allow_pickle=True))
-        original_masked_fmri = np.load(os.path.join(dir_path, 'original_masked_fmri.npy'), allow_pickle=True)
+        coco_image = np.array(Image.open(os.path.join(dir_path, 'coco_image.png')))
+        blip_hidden_states = np.load(os.path.join(dir_path, 'hidden_states_minus_position_embedding.npy'), allow_pickle=True)
+        blip_image_embedding, blip_caption_embedding = self.__split_and_concat__(np.squeeze(blip_hidden_states))
+        blip_caption_embedding_fixed, blip_caption_embedding_variable = self.__split_caption_embedding__(blip_caption_embedding)
+        masked_fmri = np.load(os.path.join(dir_path, 'masked_fmri.npy'), allow_pickle=True)
+        masked_fmri -= np.iinfo(np.int16).min
+        masked_fmri_embedding = np.load(os.path.join(dir_path, 'masked_fmri_embedding.npy'), allow_pickle=True)
         strings_json_path = os.path.join(dir_path, 'strings.json')
 
-        image = torch.tensor(image, dtype=torch.float32)                                 # (425, 425, 3)
-        blip_masked_embedding = torch.tensor(blip_masked_embedding, dtype=torch.float32) # (77, 768)
-        hidden_states_image = torch.tensor(hidden_states_image, dtype=torch.float32)     # (16, 768)
-        hidden_states_caption_fixed = torch.tensor(hidden_states_caption_fixed, dtype=torch.float32) # (3, 768)
-        hidden_states_caption_variable = torch.tensor(hidden_states_caption_variable, dtype=torch.float32) # (58, 768)
-        original_masked_fmri = torch.tensor(original_masked_fmri, dtype=torch.float32) # (K,)
+        coco_image = torch.tensor(coco_image, dtype=torch.float32)                       # (425, 425, 3)
+        masked_fmri = torch.tensor(masked_fmri, dtype=torch.float32)                     # (K,)
+        masked_fmri_embedding = torch.tensor(masked_fmri_embedding, dtype=torch.float32) # (77, 768)
+        blip_image_embedding = torch.tensor(blip_image_embedding, dtype=torch.float32)   # (16, 768)
+        blip_caption_embedding_fixed = torch.tensor(blip_caption_embedding_fixed, dtype=torch.float32)       # (3, 768)
+        blip_caption_embedding_variable = torch.tensor(blip_caption_embedding_variable, dtype=torch.float32) # (58, 768)
 
-        # test
-        original_masked_fmri = (original_masked_fmri - original_masked_fmri.min())/(original_masked_fmri.max()-original_masked_fmri.min())
-        image = (image - image.min())/(image.max()-image.min())
-        # test
-
-        return DataPoint(index, image, blip_masked_embedding, original_masked_fmri, hidden_states_image, 
-                         hidden_states_caption_fixed, hidden_states_caption_variable, strings_json_path)
+        return DataPoint(index, coco_image, masked_fmri, masked_fmri_embedding, blip_image_embedding, 
+                         blip_caption_embedding_fixed, blip_caption_embedding_variable, strings_json_path)
 
     def __len__(self) -> int:
         return len(self.dirs)

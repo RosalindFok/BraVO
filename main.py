@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from losses import Decoder_loss
 from config import configs_dict
 from dataset import fetch_nsd_rois_and_labels, NSD_Dataset, make_nsd_dataset
-from models import device, devices_num, num_workers, get_GPU_memory_usage, Image_Decoder, Caption_Decoder, fMRI2Image
+from models import device, devices_num, num_workers, get_GPU_memory_usage, Image_Decoder, Caption_Decoder
 from utils import join_paths, check_and_make_dirs, write_json_file, read_json_file, merge_dicts_if_no_conflict
 from utils import train_results_dir_path, test_results_dir_path, nsd_subject_saved_dir_path, fmrishape_subject_saved_dir_path
 
@@ -33,22 +33,19 @@ def train(
     mem_reserved_list = []
     tower_name = tower_name.lower()
     for batches in tqdm(dataloader, desc='Training', leave=True):
+        input_embedding = batches.masked_fmri.to(device)
         # select the tower, load data to device and set the dtype as float32
-        # if tower_name in ['image', 'i']:
-        #     input_embedding = batches.blip_masked_embedding.to(device)
-        #     target_embedding = batches.hidden_states_image.to(device)
-        # elif tower_name in ['text', 't', 'caption', 'c']:
-        #     input_embedding = batches.blip_masked_embedding.to(device)
-        #     target_embedding = batches.hidden_states_caption_variable.to(device)
-        # else:
-        #     raise ValueError(f'tower_name={tower_name} is not supported')
-
-        ### test
-        input_embedding = batches.original_masked_fmri.to(device)
-        target_embedding = batches.image.to(device)
-        ### test
-
+        if tower_name in ['image', 'i']:
+            # input_embedding = batches.masked_fmri_embedding.to(device)
+            target_embedding = batches.blip_image_embedding.to(device)
+        elif tower_name in ['text', 't', 'caption', 'c']:
+            # input_embedding = batches.masked_fmri_embedding.to(device)
+            target_embedding = batches.blip_caption_embedding_variable.to(device)
+        else:
+            raise ValueError(f'tower_name={tower_name} is not supported')
         # Forward
+        # input_embedding = torch.nn.Sigmoid()(input_embedding)
+        # target_embedding = torch.nn.Sigmoid()(target_embedding)
         pred_embedding  = model(input_embedding)
         # Compute loss
         loss = loss_fn(input=pred_embedding, target=target_embedding)
@@ -80,87 +77,70 @@ def test(
         return array
     
     get_mae_loss = lambda y_pred, y_true: float(np.mean(np.abs(y_pred-y_true)))
-    get_mse_loss = lambda y_pred, y_true: float(np.mean((y_pred-y_true)**2))
+    get_cosine_similarity = lambda y_pred, y_true: float(np.dot(y_pred, y_true) / (np.linalg.norm(y_pred) * np.linalg.norm(y_true)))
     model.eval()
-    maeloss_dict, mseloss_dict = {}, {}
+    maeloss_dict, cossimi_dict = {}, {}
     mem_reserved_list = []
     with torch.no_grad():
         desc = 'Testing' if saved_test_results_dir_path is not None else 'Validating'
         for batches in tqdm(dataloader, desc=desc, leave=True):
             index = batches.index
+            input_embedding = batches.masked_fmri.to(device)
             # # select the tower, load data to device and set the dtype as float32
             # if tower_name in ['image', 'i']:
-            #     input_embedding = batches.blip_masked_embedding.to(device)
+            #     input_embedding = batches.masked_fmri_embedding.to(device)
             # elif tower_name in ['text', 't', 'caption', 'c']:
-            #     input_embedding = batches.blip_masked_embedding.to(device)
+            #     input_embedding = batches.masked_fmri_embedding.to(device)
             # else:
             #     raise ValueError(f'tower_name={tower_name} is not supported')
-
-            ### test
-            input_embedding = batches.original_masked_fmri.to(device)
-            ### test
-
             # Forward
+            # input_embedding = torch.nn.Sigmoid()(input_embedding)
             pred_embedding  = model(input_embedding)
+            # pred_embedding = torch.log(pred_embedding / (1 - pred_embedding)) # inverse sigmod
             index = index.cpu().numpy()
             pred_embedding = pred_embedding.cpu().numpy()
-
-            ### test
-            image = batches.image.cpu().numpy()
-            for idx, pred_emb, img in zip(index, pred_embedding, image):
-                maeloss_dict[int(idx)] = get_mae_loss(pred_emb, img)
-                mseloss_dict[int(idx)] = get_mse_loss(pred_emb, img)
+            blip_image_embedding = batches.blip_image_embedding.numpy()
+            blip_caption_embedding_fixed = batches.blip_caption_embedding_fixed.numpy()
+            blip_caption_embedding_variable = batches.blip_caption_embedding_variable.numpy()
+            strings_json_paths = batches.strings_json_path
+            image = batches.coco_image.numpy()
+            for idx, pred_emb, img, hsi, hsc_fix, hsc_var, strings_json_path in zip(
+                                                                        index, pred_embedding, image, 
+                                                                        blip_image_embedding, 
+                                                                        blip_caption_embedding_fixed, 
+                                                                        blip_caption_embedding_variable, 
+                                                                        strings_json_paths):
+                true_emb = hsi if tower_name in ['image', 'i'] else hsc_var
+                save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
+                maeloss_dict[int(idx)] = get_mae_loss(pred_emb, true_emb)
+                cossimi_dict[int(idx)] = get_cosine_similarity(pred_emb.flatten(), true_emb.flatten())
                 if saved_test_results_dir_path is not None:
                     saved_path = join_paths(saved_test_results_dir_path, str(idx))
                     check_and_make_dirs(saved_path)
-                    pred_emb =  (((pred_emb-pred_emb.min())/(pred_emb.max()-pred_emb.min())) * 255).astype(np.uint8)
-                    img = (img * 255).astype(np.uint8)
-                    Image.fromarray(pred_emb).save(join_paths(saved_path, 'prediction.png'))
-                    Image.fromarray(img).save(join_paths(saved_path, 'groundtruth.png'))
-            ### test
+                    np.save(join_paths(saved_path, f'bravo{save_tag}'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=pred_emb))
+                    np.save(join_paths(saved_path, f'blip_img.npy'), hsi)
+                    np.save(join_paths(saved_path, f'blip_cap.npy'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=true_emb))
+                    np.save(join_paths(saved_path, 'coco.npy'), img.astype(np.uint8))
+                    strings = read_json_file(strings_json_path)
+                    write_json_file(path=join_paths(saved_path, 'captions.json'), data={'blip_caption' : strings['category_string']+'. '+strings['blip_caption'] })
 
-            # hidden_states_image = batches.hidden_states_image.numpy()
-            # hidden_states_caption_fixed = batches.hidden_states_caption_fixed.numpy()
-            # hidden_states_caption_variable = batches.hidden_states_caption_variable.numpy()
-            # strings_json_paths = batches.strings_json_path
-            # image = batches.image.numpy()
-            # for idx, pred_emb, img, hsi, hsc_fix, hsc_var, strings_json_path in zip(
-            #                                                             index, pred_embedding, image, 
-            #                                                             hidden_states_image, 
-            #                                                             hidden_states_caption_fixed, 
-            #                                                             hidden_states_caption_variable, 
-            #                                                             strings_json_paths):
-            #     true_emb = hsi if tower_name in ['image', 'i'] else hsc_var
-            #     save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
-            #     maeloss_dict[int(idx)] = get_mae_loss(pred_emb, true_emb)
-            #     mseloss_dict[int(idx)] = get_mse_loss(pred_emb, true_emb)
-            #     if saved_test_results_dir_path is not None:
-            #         saved_path = join_paths(saved_test_results_dir_path, str(idx))
-            #         check_and_make_dirs(saved_path)
-            #         np.save(join_paths(saved_path, f'bravo{save_tag}'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=pred_emb))
-            #         np.save(join_paths(saved_path, f'blip_img.npy'), hsi)
-            #         np.save(join_paths(saved_path, f'blip_cap.npy'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=true_emb))
-            #         np.save(join_paths(saved_path, 'coco.npy'), img.astype(np.uint8))
-            #         strings = read_json_file(strings_json_path)
-            #         write_json_file(path=join_paths(saved_path, 'captions.json'), data={'blip' : strings['category_string'] + strings['blip_caption'] })
-
-    # Save the MAE and MSE loss
+    # Save the MAE Loss and Cosine Similarity
     avg_maeloss = sum([value for value in maeloss_dict.values()])/len(maeloss_dict)
-    avg_mseloss = sum([value for value in mseloss_dict.values()])/len(mseloss_dict)
+    avg_cossimi = sum([value for value in cossimi_dict.values()])/len(cossimi_dict)
     max_maeloss_key = max(maeloss_dict, key=maeloss_dict.get)
     min_maeloss_key = min(maeloss_dict, key=maeloss_dict.get)
-    max_mseloss_key = max(mseloss_dict, key=mseloss_dict.get)
-    min_mseloss_key = min(mseloss_dict, key=mseloss_dict.get)
-    print(f'Average MAE loss: {avg_maeloss:.6f}, Max MAELoss is {max_maeloss_key}: {maeloss_dict[max_maeloss_key]:.6f}, Min MAELoss is {min_maeloss_key}: {maeloss_dict[min_maeloss_key]:.6f}')
-    print(f'Average MSE loss: {avg_mseloss:.6f}, Max MSELoss is {max_mseloss_key}: {mseloss_dict[max_mseloss_key]:.6f}, Min MSELoss is {min_mseloss_key}: {mseloss_dict[min_mseloss_key]:.6f}')
+    max_cossimi_key = max(cossimi_dict, key=cossimi_dict.get)
+    min_cossimi_key = min(cossimi_dict, key=cossimi_dict.get)
+    print(f'Average MAE loss: {avg_maeloss:.6f}, Max MAE Loss is {max_maeloss_key}: {maeloss_dict[max_maeloss_key]:.6f}, Min MAE Loss is {min_maeloss_key}: {maeloss_dict[min_maeloss_key]:.6f}')
+    print(f'Average COS simi: {avg_cossimi:.6f}, Max COS Simi is {max_cossimi_key}: {cossimi_dict[max_cossimi_key]:.6f}, Min COS Simi is {min_cossimi_key}: {cossimi_dict[min_cossimi_key]:.6f}')
         
     if saved_test_results_dir_path is not None:
         maeloss_dict = {'max key' : max_maeloss_key, 'max val' : maeloss_dict[max_maeloss_key],
                         'min key' : min_maeloss_key, 'min val' : maeloss_dict[min_maeloss_key], **maeloss_dict}
-        mseloss_dict = {'max key' : max_mseloss_key, 'max val' : mseloss_dict[max_mseloss_key],
-                        'min key' : min_mseloss_key, 'min val' : mseloss_dict[min_mseloss_key], **mseloss_dict}
+        cossimi_dict = {'max key' : max_cossimi_key, 'max val' : cossimi_dict[max_cossimi_key],
+                        'min key' : min_cossimi_key, 'min val' : cossimi_dict[min_cossimi_key], **cossimi_dict}
         write_json_file(join_paths(saved_test_results_dir_path, f'{tower_name}_maeloss.json'), maeloss_dict)
-        write_json_file(join_paths(saved_test_results_dir_path, f'{tower_name}_mseloss.json'), mseloss_dict)
+        write_json_file(join_paths(saved_test_results_dir_path, f'{tower_name}_cossimi.json'), cossimi_dict)
 
     # Monitor GPU memory usage
     total_memory, mem_reserved = get_GPU_memory_usage()
@@ -216,11 +196,7 @@ def main() -> None:
     rois_setup = namedtuple('rois_setup', ['derived_type', 'roi_name', 'thresholds'])
     rois_setup = rois_setup(derived_type, roi_name, thresholds)
     mask_data, thresholds, labels_string = fetch_nsd_rois_and_labels(subj_path=sujb_path, rois_setup=rois_setup)
-    uncond_embedding_path, causal_attention_mask_path, regions_saved_dir_path = make_nsd_dataset(subj_path=sujb_path, mask_data=mask_data, thresholds=thresholds, labels_string=labels_string)
-    uncond_embedding = np.load(uncond_embedding_path, allow_pickle=True)
-    assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} != (1, 77, 768)'
-    causal_attention_mask = np.load(causal_attention_mask_path, allow_pickle=True)
-    assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask.shape={causal_attention_mask.shape} != (1, 1, 77, 77)'
+    uncond_embedding, position_embedding, causal_attention_mask, regions_saved_dir_path = make_nsd_dataset(subj_path=sujb_path, mask_data=mask_data, thresholds=thresholds, labels_string=labels_string)
     
     ## Path to save
     # the path of training results
@@ -240,25 +216,19 @@ def main() -> None:
         test_dataloader  = DataLoader(dataset=NSD_Dataset(join_paths(regions_saved_dir_path, 'test')),  
                                       batch_size=batch_size, shuffle=False, num_workers=num_workers)
         # Loss function
-        decoder_loss = Decoder_loss(w1=1, w2=1, w3=0) 
+        decoder_loss = Decoder_loss(w1=1, w2=1, w3=1) 
         # Network
         light_loader = next(iter(test_dataloader))
         
-        ### test
-        input_shape = light_loader.original_masked_fmri.shape[1:] 
-        output_shape = light_loader.image.shape[1:] 
-        decoder_model = fMRI2Image(input_shape=input_shape, output_shape=output_shape)
-        ### test
-
-        # if tower_name in ['image', 'i']:
-        #     input_shape  = light_loader.blip_masked_embedding.shape[1:] 
-        #     output_shape = light_loader.hidden_states_image.shape[1:] 
-        #     decoder_model = Image_Decoder(input_shape=input_shape, output_shape=output_shape)
-        # elif tower_name in ['text', 't', 'caption', 'c']:
-        #     input_shape  = light_loader.blip_masked_embedding.shape[1:] 
-        #     output_shape = light_loader.hidden_states_caption_variable.shape[1:] 
-        #     decoder_model = Caption_Decoder(input_shape=input_shape, output_shape=output_shape)
-        print(f'Input Shape = {input_shape}, Output Shape = {output_shape}')
+        input_shape = light_loader.masked_fmri.shape[1:]
+        print(f'Input Shape = {input_shape}')
+        if tower_name in ['image', 'i']:
+            output_shape = light_loader.blip_image_embedding.shape[1:] 
+            decoder_model = Image_Decoder(input_shape=input_shape, output_shape=output_shape)
+        elif tower_name in ['text', 't', 'caption', 'c']:
+            output_shape = light_loader.blip_caption_embedding_variable.shape[1:] 
+            decoder_model = Caption_Decoder(input_shape=input_shape, output_shape=output_shape)
+        print(f'Output Shape = {output_shape}')
         trainable_parameters = sum(p.numel() for p in decoder_model.parameters() if p.requires_grad)
         decoder_model = decoder_model.to(device=device)
         print(decoder_model)
@@ -273,9 +243,9 @@ def main() -> None:
         for epoch in range(epochs):
             print(f'Tower {tower_name}, Epoch {epoch+1}/{epochs}')
             # train
-            lr = learning_rate*((1-epoch/epochs)**0.9)
-            for param_group in optimizer_of_brain_decoder.param_groups:
-                param_group['lr'] = lr
+            # lr = learning_rate*((1-epoch/epochs)**0.9)
+            # for param_group in optimizer_of_brain_decoder.param_groups:
+            #     param_group['lr'] = lr
             trained_model, train_loss, total_memory, mem_reserved = train(device=device, 
                                                                           model=decoder_model, 
                                                                           loss_fn=decoder_loss, 
@@ -353,9 +323,9 @@ def main() -> None:
         sorted_keys = sorted(test_dirs_path_dict.keys())
         test_dirs_path_dict = {key:test_dirs_path_dict[key] for key in sorted_keys}
         caption_maeloss = read_json_file(join_paths(saved_test_results_dir_path, 'caption_maeloss.json'))
-        caption_mseloss = read_json_file(join_paths(saved_test_results_dir_path, 'caption_mseloss.json'))
+        caption_cossimi = read_json_file(join_paths(saved_test_results_dir_path, 'caption_cossimi.json'))
         # image_maeloss   = read_json_file(join_paths(saved_test_results_dir_path, 'image_maeloss.json'))
-        # image_mseloss   = read_json_file(join_paths(saved_test_results_dir_path, 'image_mseloss.json'))
+        # image_cossimi   = read_json_file(join_paths(saved_test_results_dir_path, 'image_cossimi.json'))
         for index, dir_path in test_dirs_path_dict.items():
             print(f'Generating {index} / {len(test_dirs_path_dict)}')
             coco_matrix = np.load(join_paths(dir_path, 'coco.npy'), allow_pickle=True)
@@ -366,7 +336,7 @@ def main() -> None:
             blip_cap  = np.load(join_paths(dir_path, 'blip_cap.npy' ), allow_pickle=True)
 
             hidden_state_dict = {
-                'blip'    : __concatenate_embeddings__(img_emb=blip_img , txt_emb=blip_cap),
+                'blipdiffusion'    : __concatenate_embeddings__(img_emb=blip_img , txt_emb=blip_cap),
                 'bravo' : __concatenate_embeddings__(img_emb=blip_img , txt_emb=bravo_cap),
                 # 'image'   : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=blip_cap ),
                 # 'img+cap' : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=bravo_cap)
@@ -377,6 +347,8 @@ def main() -> None:
             captions_dict = {}
             for key in hidden_state_dict:
                 hidden_state = hidden_state_dict[key]
+                assert hidden_state.shape == position_embedding.shape, f'hidden_state.shape={hidden_state.shape} != position_embedding.shape={position_embedding.shape}'
+                hidden_state += position_embedding
                 hidden_state = torch.from_numpy(hidden_state).unsqueeze(0).to(device)
                 assert hidden_state.shape == uncond_embedding.shape, f'{hidden_state.shape} != {uncond_embedding.shape}'
                 generated_image = blip_diffusion_model.generate_image_via_embedding(
@@ -390,25 +362,25 @@ def main() -> None:
                                                         num_inference_steps=num_inference_steps,
                                                     )
                 images_dict[key] = generated_image.convert('RGB')
-                if not key == 'blip':
-                    start_time = time.time()
-                    image = blip2t5_vis_processors['eval'](images_dict[key]).unsqueeze(0).to(device)
-                    caption = blip2t5_model.generate({'image' : image, 'prompt' : prompt},
-                                                          max_length=100, min_length=30)
-                    captions_dict[key] = caption[0]
-                    end_time = time.time()
-                    print(f'Time taken to generate caption for {key}: {end_time - start_time:.4f} seconds.')
+                start_time = time.time()
+                image = blip2t5_vis_processors['eval'](images_dict[key]).unsqueeze(0).to(device)
+                caption = blip2t5_model.generate({'image' : image, 'prompt' : prompt},
+                                                      max_length=100, min_length=30)
+                captions_dict[key] = caption[0]
+                end_time = time.time()
+                print(f'Time taken to generate caption for {key}: {end_time - start_time:.4f} seconds.')
             
             __merge_images_with_separators__(images_dict=images_dict, saved_dir_path=dir_path)
             captions_json_path = join_paths(dir_path, 'captions.json')
-            blip_caption_dict = {'blip' : read_json_file(captions_json_path)['blip']}
+            blip_caption_dict = {'blip_caption' : read_json_file(captions_json_path)['blip_caption']}
             all_captions = merge_dicts_if_no_conflict(dict1=blip_caption_dict, dict2=captions_dict)
             all_captions['caption_maeloss'] = caption_maeloss[str(index)]
-            all_captions['caption_mseloss'] = caption_mseloss[str(index)]
+            all_captions['caption_cossimi'] = caption_cossimi[str(index)]
             write_json_file(captions_json_path, all_captions)
             for k, v in all_captions.items():
                 print(f'{k}: {v}')
             print()
+
     else:
         raise ValueError(f'Task should be either [train test generate generation], but got {task}.')
     

@@ -48,13 +48,12 @@ class NSD_DATA():
         ## nsddata
         self.nsddata_dir_path = join_paths(NSD_dir_path, 'nsddata')
         self.nsddata_ppdata_dir_path = join_paths(self.nsddata_dir_path, 'ppdata')
-        self.nsddata_freesurfer_dir_path = join_paths(self.nsddata_dir_path, 'freesurfer')
         # Info: https://cvnlab.slite.page/p/fRv4lz5V2F/Behavioral-data#2bdd55ef
         self.behav_responses_tsv_file_path = join_paths(self.nsddata_ppdata_dir_path, self.subj, 'behav', 'responses.tsv')
         # https://cvnlab.slite.page/p/X_7BBMgghj/ROIs#c5518e3e
-        self.roi_files_path = join_paths(self.nsddata_ppdata_dir_path, self.subj, 'func1mm', 'roi')
+        self.roi_files_path = join_paths(self.nsddata_ppdata_dir_path, self.subj, 'func1pt8mm', 'roi')
         # https://cvnlab.slite.page/p/X_7BBMgghj/ROIs#2da19afb
-        self.labels_path = join_paths(self.nsddata_freesurfer_dir_path, self.subj, 'label')
+        self.labels_path = join_paths(self.nsddata_dir_path, 'freesurfer', self.subj, 'label')
         # https://cvnlab.slite.page/p/X_7BBMgghj/ROIs#65b75445
         self.templates_path = join_paths(self.nsddata_dir_path, 'templates')
         # Info: https://cvnlab.slite.page/p/NKalgWd__F/Experiments#b0ea56ab
@@ -64,7 +63,7 @@ class NSD_DATA():
 
         ## nsddata_betas
         # Info: https://cvnlab.slite.page/p/6CusMRYfk0/Functional-data-NSD#035bbb1e
-        self.nsddata_betas_ppdata_betas_dir_path = join_paths(NSD_dir_path, 'nsddata_betas', 'ppdata', self.subj, 'func1mm', 'betas_fithrf_GLMdenoise_RR')
+        self.nsddata_betas_ppdata_betas_dir_path = join_paths(NSD_dir_path, 'nsddata_betas', 'ppdata', self.subj, 'func1pt8mm', 'betas_fithrf_GLMdenoise_RR')
         
         ## nsddata_stimuli
         # Info: https://cvnlab.slite.page/p/NKalgWd__F/Experiments#b44e32c0
@@ -117,10 +116,10 @@ class NSD_DATA():
         # Info: https://cvnlab.slite.page/p/6CusMRYfk0/Functional-data-NSD#3e1740b1
         file_name = f'betas_session{str(session_id).zfill(2)}.nii.gz'
         file_path = join_paths(self.nsddata_betas_ppdata_betas_dir_path, file_name)
-        header, data = read_nii_file(file_path) # dims=(145, 186, 148, 750); dtype=float64
+        header, data = read_nii_file(file_path) 
         assert np.iinfo(np.int16).min <= np.min(data) and np.iinfo(np.int16).max >= np.max(data), 'Data range is not within int16 range.'
         data = data.astype(np.int16)
-        data = np.transpose(data, (3, 0, 1, 2)) # dims=(750, 145, 186, 148)
+        data = np.transpose(data, (3, 0, 1, 2)) 
         end_time = time.time()
         print(f'It took {end_time - start_time:.2f} seconds to read {file_path}.')
         return data
@@ -343,7 +342,7 @@ class NSD_DATA():
         path_dict = {'train' : [], 'test' : []} 
         for session_id in responses['SESSION'].unique():
             response = responses[responses['SESSION'] == session_id].to_numpy()
-            nii_data = self.read_betas(session_id=session_id)
+            nii_data = self.read_betas(session_id=session_id) # shape = (750, 81, 104, 83)
             assert len(response) == len(nii_data), f'Number of responses and betas are not equal in session {session_id}.'
             for trial, fmri in tqdm(zip(response, nii_data), total=len(nii_data), desc=f'Processing {self.subj} session {session_id}', leave=True):
                 # correct trial
@@ -399,7 +398,7 @@ class NSD_DATA():
                         category_list = categories_dict[stim_info[KID_73]] # list[dict[str, any]], [{'supercategory', 'name', 'area}]
                         # string: describe the number of each category in the image
                         element_counts = Counter([category['name'] for category in category_list])
-                        category_string = 'There are ' + ', '.join(f'{count} {element}' for element, count in element_counts.items()) + ' in this image.'
+                        category_string = ', '.join(f'{count} {element}' for element, count in element_counts.items())
                         # select the category with the biggest area in sum
                         area_of_each_category = defaultdict(float) 
                         for category in category_list:
@@ -474,11 +473,11 @@ class NSD_DATA():
             captions_set = {} # {index : caption}
             for dataset, tag, saved_path, number in zip(dataset_queue, tag_queue, saved_path_queue, number_queue):
                 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-                for batches in tqdm(dataloader, desc=f'{tag} set', leave=True):
+                for batches in tqdm(dataloader, desc=f'Generate captions for {tag} set', leave=True):
                     indices = batches.index.to('cpu').numpy()
                     images = batches.image.to(device) # torch.Size([batch_size, 425, 425, 3])
                     output_text = blip2t5_model.generate({'image' : images, 'prompt' : prompt},
-                                                          max_length=100, min_length=30)
+                                                          max_length=100, min_length=20)
                     for index, text in zip(indices, output_text):
                         index = int(index)
                         captions_set[index] = text
@@ -505,6 +504,7 @@ class NSD_DATA():
         need_embedding_train = __check_hdf5_file__(path=blipdiffusion_generated_embeddings_of_train_set_path, target_length=num_train)
         need_embedding_test  = __check_hdf5_file__(path=blipdiffusion_generated_embeddings_of_test_set_path , target_length=num_test)
         uncond_embedding_path = join_paths(blips_output_dir_path, 'uncond_embedding.npy')
+        position_embeddings_path = join_paths(blips_output_dir_path, 'position_embeddings.npy')
         causal_attention_mask_path = join_paths(blips_output_dir_path, 'causal_attention_mask.npy')
         all_strings_train_path = join_paths(self.subject_saved_dir_path,f'all_strings_path_in_train.json')
         all_strings_test_path  = join_paths(self.subject_saved_dir_path,f'all_strings_path_in_test.json')
@@ -518,6 +518,7 @@ class NSD_DATA():
                 'json' : all_strings_test_path
             },
             'uncond_embedding_path' : uncond_embedding_path,
+            'position_embeddings_path' : position_embeddings_path,
             'causal_attention_mask_path' : causal_attention_mask_path
         }
         write_json_file(path=run_files_path, data=run_files_dict)
@@ -548,7 +549,7 @@ class NSD_DATA():
                 captions = {int(k) : v for k, v in captions.items()} 
                 all_strings_path = {} # {index : path}
                 with h5py.File(hdf5_path, 'w') as hdf5_file:
-                    for index, files_dict in tqdm(files.items(), desc=f'{tag} set', leave=True):
+                    for index, files_dict in tqdm(files.items(), desc=f'Generate embeddings for {tag} set', leave=True):
                         hdf5_group = hdf5_file.create_group(name=str(index))
                         image_rgb = Image.open(files_dict['image']).convert('RGB')
                         _, fmri = read_nii_file(files_dict['fmri'])
@@ -564,20 +565,24 @@ class NSD_DATA():
                         category_string = bd_txt_processors['eval'](category_string)
                         sample = {
                             'cond_images'  : cond_image,
-                            'prompt'       : [bd_txt_processors['eval'](strings['category_string']+strings['blip_caption'])],
+                            'prompt'       : [bd_txt_processors['eval'](strings['category_string']+'. '+strings['blip_caption'])],
                             'cond_subject' : category_string,
-                            'tgt_subject'  : category_string
+                            'tgt_subject'  : category_string,
                         }
-                        hidden_states, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
+                        hidden_states, position_embeddings, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
                         assert hidden_states.shape == (1, 77, 768), f'embedding shape is {hidden_states.shape}, not (1, 77, 768).'
+                        assert position_embeddings.shape == (1, 77, 768), f'position_embeddings shape is {position_embeddings.shape}, not (1, 77, 768).'
                         assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask shape is {causal_attention_mask.shape}, not (1, 1, 77, 77).'
                         hidden_states = hidden_states.cpu().numpy()
+                        position_embeddings = position_embeddings.cpu().numpy()
                         causal_attention_mask = causal_attention_mask.cpu().numpy()
                         if not os.path.exists(causal_attention_mask_path):
                             np.save(file=causal_attention_mask_path, arr=causal_attention_mask)
+                        if not os.path.exists(position_embeddings_path):
+                            np.save(file=position_embeddings_path, arr=position_embeddings)
                         image = np.array(image_rgb)
-                        for name, data in zip(['image', 'fmri', 'hidden_states'], 
-                                              [ image ,  fmri ,  hidden_states ]): # shape: (425, 425, 3),(145, 186, 148),(1, 77, 768)
+                        for name, data in zip(['image', 'fmri', 'hidden_states', 'position_embeddings'], 
+                                              [ image ,  fmri ,  hidden_states ,  position_embeddings]): 
                             hdf5_dataset = hdf5_group.create_dataset(name=name, shape=data.shape, dtype=data.dtype)
                             hdf5_dataset[:] = data
                 write_json_file(path=json_path, data=all_strings_path)        
