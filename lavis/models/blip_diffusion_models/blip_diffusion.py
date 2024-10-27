@@ -592,7 +592,7 @@ class BlipDiffusion(BaseModel):
         samples,
         prompt_strength=1.0,
         prompt_reps=20
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         cond_image = samples["cond_images"]  # reference image
         cond_subject = samples["cond_subject"]  # source subject category
         tgt_subject = samples["tgt_subject"]  # target subject category

@@ -9,7 +9,7 @@ import nibabel as nib
 from config import configs_dict
 
 ''' utility functions '''
-join_paths = lambda *args: os.path.abspath(os.path.join(*args))
+join_paths = lambda *args: os.path.join(*args)
 read_nii_file = lambda path: [nib.load(path).header, nib.load(path).get_fdata()]
 save_nii_file = lambda data, path: nib.save(nib.Nifti1Image(data, np.eye(4)), path)
 check_and_make_dirs = lambda path: os.makedirs(path, exist_ok=True)
@@ -112,9 +112,10 @@ def get_file_size(file_path : str) -> str:
     return f'{size:.4f} {units[unit_index]}.'
 
 ''' paths '''
-NSD_dir_path = join_paths('..', 'dataset', 'NSD')
-fMRI_Shape_dir_path = join_paths('..', 'dataset', 'fMRI_Shape')
-run_saved_dir_path = join_paths('..', 'run_saved')
+root_dir = '..'
+NSD_dir_path = join_paths(root_dir, 'dataset', 'NSD')
+fMRI_Shape_dir_path = join_paths(root_dir, 'dataset', 'fMRI_Shape')
+run_saved_dir_path = join_paths(root_dir, 'run_saved')
 check_and_make_dirs(run_saved_dir_path)
 train_results_dir_path = join_paths(run_saved_dir_path, 'train_results')
 check_and_make_dirs(train_results_dir_path)
@@ -124,7 +125,7 @@ NSD_saved_dir_path = join_paths(run_saved_dir_path, 'NSD_preprocessed_pairs')
 check_and_make_dirs(NSD_saved_dir_path)
 fmrishape_saved_dir_path = join_paths(run_saved_dir_path, 'fMRIShape_preprocessed_pairs')
 check_and_make_dirs(fmrishape_saved_dir_path)
-sam2_ckpt_dir_path = join_paths('..', 'large_files_for_BraVO', 'SAM2')
+sam2_ckpt_dir_path = join_paths(root_dir, 'large_files_for_BraVO', 'SAM2')
 # for NSD subj  
 nsd_subject_saved_dir_path = join_paths(NSD_saved_dir_path, f"subj{str(configs_dict['subj_id']).zfill(2)}")
 check_and_make_dirs(nsd_subject_saved_dir_path)
@@ -134,3 +135,39 @@ fmrishape_subject_saved_dir_path = join_paths(fmrishape_saved_dir_path, f"subj{s
 check_and_make_dirs(fmrishape_subject_saved_dir_path)
 
 
+''' priori of BLIP '''
+class BLIP_Prior_Tools:
+    embedding_length = 768
+    img_queries_num  = 16
+    txt_queries_num  = 61
+    all_embeddings_num = img_queries_num + txt_queries_num
+
+    @staticmethod
+    def split_and_concat(array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        assert array.shape == (BLIP_Prior_Tools.all_embeddings_num, BLIP_Prior_Tools.embedding_length), f'{array.shape} != (77, 768)'
+        array_1, array_2, arrayr_3 = np.split(array, [2, 18]) # BLIP decides, 77 = 2+16+59
+        image_embedding = array_2
+        text_embedding = np.concatenate((array_1, arrayr_3), axis=0)
+        assert image_embedding.shape == (BLIP_Prior_Tools.img_queries_num, BLIP_Prior_Tools.embedding_length), f'image_embedding.shape={image_embedding.shape} != (16, 768)'
+        assert text_embedding.shape  == (BLIP_Prior_Tools.txt_queries_num, BLIP_Prior_Tools.embedding_length), f'text_embedding.shape={text_embedding.shape} != (61, 768)'
+        return image_embedding, text_embedding
+
+    @staticmethod
+    def split_caption_embedding(array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        assert array.shape == (BLIP_Prior_Tools.txt_queries_num, BLIP_Prior_Tools.embedding_length), f'{array.shape} != (61, 768)'
+        array_0 = array[0]
+        array_1 = array[1]
+        array_60 = array[60]
+        array_fixed = np.stack([array_0, array_1, array_60], axis=0)
+        array_variable = array[2:60]
+        assert array_fixed.shape == (3, BLIP_Prior_Tools.embedding_length), f'array_fixed.shape={array_fixed.shape} != (3, 768)'
+        assert array_variable.shape == (58, BLIP_Prior_Tools.embedding_length), f'array_variable.shape={array_variable.shape} != (58, 768)'
+        return array_fixed, array_variable
+    
+    @staticmethod
+    def concatenate_embeddings(img_emb : np.ndarray, txt_emb : np.ndarray) -> np.ndarray:
+        assert img_emb.shape == (BLIP_Prior_Tools.img_queries_num, BLIP_Prior_Tools.embedding_length), f'img_emb={img_emb.shape} should be (16, 768)'
+        assert txt_emb.shape == (BLIP_Prior_Tools.txt_queries_num, BLIP_Prior_Tools.embedding_length), f'txt_emb={txt_emb.shape} should be (61, 768)'
+        result = np.concatenate((txt_emb[:2, :], img_emb, txt_emb[2:, :]), axis=0)
+        assert result.shape == (BLIP_Prior_Tools.all_embeddings_num, BLIP_Prior_Tools.embedding_length), f'result.shape={result.shape} should be (77, 768)'
+        return result

@@ -506,8 +506,9 @@ class NSD_DATA():
         uncond_embedding_path = join_paths(blips_output_dir_path, 'uncond_embedding.npy')
         position_embeddings_path = join_paths(blips_output_dir_path, 'position_embeddings.npy')
         causal_attention_mask_path = join_paths(blips_output_dir_path, 'causal_attention_mask.npy')
-        all_strings_train_path = join_paths(self.subject_saved_dir_path,f'all_strings_path_in_train.json')
-        all_strings_test_path  = join_paths(self.subject_saved_dir_path,f'all_strings_path_in_test.json')
+        all_strings_train_path = join_paths(self.subject_saved_dir_path, 'all_strings_path_in_train.json')
+        all_strings_test_path  = join_paths(self.subject_saved_dir_path, 'all_strings_path_in_test.json')
+        null_sample_hidden_states_path = join_paths(blips_output_dir_path, 'null_sample_hidden_states.npy')
         run_files_dict = {
             'train' : {
                 'hdf5' : blipdiffusion_generated_embeddings_of_train_set_path,
@@ -519,7 +520,8 @@ class NSD_DATA():
             },
             'uncond_embedding_path' : uncond_embedding_path,
             'position_embeddings_path' : position_embeddings_path,
-            'causal_attention_mask_path' : causal_attention_mask_path
+            'causal_attention_mask_path' : causal_attention_mask_path,
+            'null_sample_hidden_states_path' : null_sample_hidden_states_path
         }
         write_json_file(path=run_files_path, data=run_files_dict)
 
@@ -567,7 +569,7 @@ class NSD_DATA():
                             'cond_images'  : cond_image,
                             'prompt'       : [bd_txt_processors['eval'](strings['category_string']+'. '+strings['blip_caption'])],
                             'cond_subject' : category_string,
-                            'tgt_subject'  : category_string,
+                            'tgt_subject'  : category_string
                         }
                         hidden_states, position_embeddings, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
                         assert hidden_states.shape == (1, 77, 768), f'embedding shape is {hidden_states.shape}, not (1, 77, 768).'
@@ -576,13 +578,25 @@ class NSD_DATA():
                         hidden_states = hidden_states.cpu().numpy()
                         position_embeddings = position_embeddings.cpu().numpy()
                         causal_attention_mask = causal_attention_mask.cpu().numpy()
+                        image = np.array(image_rgb)
                         if not os.path.exists(causal_attention_mask_path):
                             np.save(file=causal_attention_mask_path, arr=causal_attention_mask)
                         if not os.path.exists(position_embeddings_path):
                             np.save(file=position_embeddings_path, arr=position_embeddings)
-                        image = np.array(image_rgb)
-                        for name, data in zip(['image', 'fmri', 'hidden_states', 'position_embeddings'], 
-                                              [ image ,  fmri ,  hidden_states ,  position_embeddings]): 
+                        if not os.path.exists(null_sample_hidden_states_path):
+                            null_image = Image.fromarray(np.zeros_like(image))
+                            null_image = bd_vis_processors['eval'](null_image).unsqueeze(0).to(device)
+                            null_sample = {
+                                'cond_images'  : null_image,
+                                'prompt'       : [bd_txt_processors['eval']('')],
+                                'cond_subject' : bd_txt_processors['eval']('none'),
+                                'tgt_subject'  : bd_txt_processors['eval']('none')
+                            }
+                            null_hidden_states, _, _ = blip_diffusion_model.generate_embedding(samples=null_sample)
+                            null_hidden_states = null_hidden_states.cpu().numpy()
+                            np.save(file=null_sample_hidden_states_path, arr=null_hidden_states)
+                        for name, data in zip(['image', 'fmri', 'hidden_states'], 
+                                              [ image ,  fmri ,  hidden_states ]): 
                             hdf5_dataset = hdf5_group.create_dataset(name=name, shape=data.shape, dtype=data.dtype)
                             hdf5_dataset[:] = data
                 write_json_file(path=json_path, data=all_strings_path)        

@@ -12,7 +12,7 @@ from losses import Decoder_loss
 from config import configs_dict
 from dataset import fetch_nsd_rois_and_labels, NSD_Dataset, make_nsd_dataset
 from models import device, devices_num, num_workers, get_GPU_memory_usage, Image_Decoder, Caption_Decoder
-from utils import join_paths, check_and_make_dirs, write_json_file, read_json_file, merge_dicts_if_no_conflict
+from utils import join_paths, check_and_make_dirs, write_json_file, read_json_file, merge_dicts_if_no_conflict, BLIP_Prior_Tools
 from utils import train_results_dir_path, test_results_dir_path, nsd_subject_saved_dir_path, fmrishape_subject_saved_dir_path
 
 
@@ -33,19 +33,16 @@ def train(
     mem_reserved_list = []
     tower_name = tower_name.lower()
     for batches in tqdm(dataloader, desc='Training', leave=True):
-        input_embedding = batches.masked_fmri.to(device)
         # select the tower, load data to device and set the dtype as float32
         if tower_name in ['image', 'i']:
-            # input_embedding = batches.masked_fmri_embedding.to(device)
+            input_embedding = batches.masked_fmri.to(device)
             target_embedding = batches.blip_image_embedding.to(device)
         elif tower_name in ['text', 't', 'caption', 'c']:
-            # input_embedding = batches.masked_fmri_embedding.to(device)
+            input_embedding = batches.masked_fmri_embedding.to(device)
             target_embedding = batches.blip_caption_embedding_variable.to(device)
         else:
             raise ValueError(f'tower_name={tower_name} is not supported')
         # Forward
-        # input_embedding = torch.nn.Sigmoid()(input_embedding)
-        # target_embedding = torch.nn.Sigmoid()(target_embedding)
         pred_embedding  = model(input_embedding)
         # Compute loss
         loss = loss_fn(input=pred_embedding, target=target_embedding)
@@ -76,7 +73,7 @@ def test(
         assert array.shape == (61, 768)
         return array
     
-    get_mae_loss = lambda y_pred, y_true: float(np.mean(np.abs(y_pred-y_true)))
+    get_mae_loss = lambda y_pred, y_true: float(np.mean(np.abs(y_pred.flatten()-y_true.flatten())))
     get_cosine_similarity = lambda y_pred, y_true: float(np.dot(y_pred, y_true) / (np.linalg.norm(y_pred) * np.linalg.norm(y_true)))
     model.eval()
     maeloss_dict, cossimi_dict = {}, {}
@@ -85,18 +82,12 @@ def test(
         desc = 'Testing' if saved_test_results_dir_path is not None else 'Validating'
         for batches in tqdm(dataloader, desc=desc, leave=True):
             index = batches.index
-            input_embedding = batches.masked_fmri.to(device)
-            # # select the tower, load data to device and set the dtype as float32
-            # if tower_name in ['image', 'i']:
-            #     input_embedding = batches.masked_fmri_embedding.to(device)
-            # elif tower_name in ['text', 't', 'caption', 'c']:
-            #     input_embedding = batches.masked_fmri_embedding.to(device)
-            # else:
-            #     raise ValueError(f'tower_name={tower_name} is not supported')
+            if tower_name in ['image', 'i']:
+                input_embedding = batches.masked_fmri.to(device)
+            elif tower_name in ['text', 't', 'caption', 'c']:
+                input_embedding = batches.masked_fmri_embedding.to(device)
             # Forward
-            # input_embedding = torch.nn.Sigmoid()(input_embedding)
             pred_embedding  = model(input_embedding)
-            # pred_embedding = torch.log(pred_embedding / (1 - pred_embedding)) # inverse sigmod
             index = index.cpu().numpy()
             pred_embedding = pred_embedding.cpu().numpy()
             blip_image_embedding = batches.blip_image_embedding.numpy()
@@ -110,19 +101,41 @@ def test(
                                                                         blip_caption_embedding_fixed, 
                                                                         blip_caption_embedding_variable, 
                                                                         strings_json_paths):
+                hsi = np.argmax(hsi, axis=-1).astype(np.float32)
+                hsi /= 10
+                hsi -= 2.1
+                hsi = np.around(hsi, 1)
+                # hsc_var *= 0.26
+                # hsc_var -= 0.1
                 true_emb = hsi if tower_name in ['image', 'i'] else hsc_var
                 save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
+                if tower_name in ['image', 'i']:
+                    # pass
+                    pred_emb = np.argmax(pred_emb, axis=-1).astype(np.float32)
+                    pred_emb /= 10
+                    pred_emb -= 2.1
+                    pred_emb = np.around(pred_emb, 1)
+                elif tower_name in ['text', 't', 'caption', 'c']:
+                    pass
+                    # pred_emb = (pred_emb - pred_emb.min()) / (pred_emb.max() - pred_emb.min())
+                    # pred_emb *= 0.26
+                    # pred_emb -= 0.1
                 maeloss_dict[int(idx)] = get_mae_loss(pred_emb, true_emb)
                 cossimi_dict[int(idx)] = get_cosine_similarity(pred_emb.flatten(), true_emb.flatten())
                 if saved_test_results_dir_path is not None:
                     saved_path = join_paths(saved_test_results_dir_path, str(idx))
                     check_and_make_dirs(saved_path)
-                    np.save(join_paths(saved_path, f'bravo{save_tag}'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=pred_emb))
+                    if tower_name in ['image', 'i']:
+                        assert pred_emb.shape == (16, 768), f'pred_emb.shape={pred_emb.shape} != (16, 768)'
+                        np.save(join_paths(saved_path, f'bravo{save_tag}'), pred_emb)
+                    else:
+                        np.save(join_paths(saved_path, f'bravo{save_tag}'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=pred_emb))
                     np.save(join_paths(saved_path, f'blip_img.npy'), hsi)
-                    np.save(join_paths(saved_path, f'blip_cap.npy'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=true_emb))
+                    np.save(join_paths(saved_path, f'blip_cap.npy'), __concat_caption_embedding__(array_fixed=hsc_fix, array_variable=hsc_var))
                     np.save(join_paths(saved_path, 'coco.npy'), img.astype(np.uint8))
+                    assert os.path.exists(strings_json_path), f'strings_json_path={strings_json_path} does not exist!'
                     strings = read_json_file(strings_json_path)
-                    write_json_file(path=join_paths(saved_path, 'captions.json'), data={'blip_caption' : strings['category_string']+'. '+strings['blip_caption'] })
+                    write_json_file(path=join_paths(saved_path, 'captions.json'), data={'blip_caption' : strings['category_string']+'. '+strings['blip_caption']})
 
     # Save the MAE Loss and Cosine Similarity
     avg_maeloss = sum([value for value in maeloss_dict.values()])/len(maeloss_dict)
@@ -163,9 +176,7 @@ def main() -> None:
     dataset_name = configs_dict['dataset_name']
     # train brain decoder
     batch_size = configs_dict['train_decoder']['batch_size'] * devices_num
-    # batch_size = batch_size * 16 if tower_name in ['image', 'i'] else batch_size
     learning_rate = configs_dict['train_decoder']['learning_rate']
-    # learning_rate = learning_rate * 0.1 if tower_name in ['image', 'i'] else learning_rate
     epochs = configs_dict['train_decoder']['epochs']
     # roi
     derived_type = configs_dict['NSD_ROIs']['derived_type']
@@ -196,8 +207,14 @@ def main() -> None:
     rois_setup = namedtuple('rois_setup', ['derived_type', 'roi_name', 'thresholds'])
     rois_setup = rois_setup(derived_type, roi_name, thresholds)
     mask_data, thresholds, labels_string = fetch_nsd_rois_and_labels(subj_path=sujb_path, rois_setup=rois_setup)
-    uncond_embedding, position_embedding, causal_attention_mask, regions_saved_dir_path = make_nsd_dataset(subj_path=sujb_path, mask_data=mask_data, thresholds=thresholds, labels_string=labels_string)
-    
+    arrays_point = make_nsd_dataset(subj_path=sujb_path, mask_data=mask_data, thresholds=thresholds, labels_string=labels_string)
+    uncond_embedding = arrays_point.uncond_embedding
+    position_embedding = arrays_point.position_embedding
+    causal_attention_mask = arrays_point.causal_attention_mask
+    null_sample_hidden_states = arrays_point.null_sample_hidden_states
+    null_img_embedding, null_cap_embedding = BLIP_Prior_Tools.split_and_concat(null_sample_hidden_states.squeeze())
+    regions_saved_dir_path = arrays_point.regions_saved_dir_path
+
     ## Path to save
     # the path of training results
     path_info = (dataset_name, f'subj{str(subj_id).zfill(2)}', f'{derived_type}_{roi_name}', f'{labels_string}')
@@ -216,18 +233,19 @@ def main() -> None:
         test_dataloader  = DataLoader(dataset=NSD_Dataset(join_paths(regions_saved_dir_path, 'test')),  
                                       batch_size=batch_size, shuffle=False, num_workers=num_workers)
         # Loss function
-        decoder_loss = Decoder_loss(w1=1, w2=1, w3=1) 
+        decoder_loss = Decoder_loss(w1=1, w2=1, w3=0) 
         # Network
         light_loader = next(iter(test_dataloader))
         
-        input_shape = light_loader.masked_fmri.shape[1:]
-        print(f'Input Shape = {input_shape}')
         if tower_name in ['image', 'i']:
+            input_shape = light_loader.masked_fmri.shape[1:]
             output_shape = light_loader.blip_image_embedding.shape[1:] 
             decoder_model = Image_Decoder(input_shape=input_shape, output_shape=output_shape)
         elif tower_name in ['text', 't', 'caption', 'c']:
+            input_shape = light_loader.masked_fmri_embedding.shape[1:]
             output_shape = light_loader.blip_caption_embedding_variable.shape[1:] 
             decoder_model = Caption_Decoder(input_shape=input_shape, output_shape=output_shape)
+        print(f'Input Shape  = {input_shape}')
         print(f'Output Shape = {output_shape}')
         trainable_parameters = sum(p.numel() for p in decoder_model.parameters() if p.requires_grad)
         decoder_model = decoder_model.to(device=device)
@@ -243,9 +261,9 @@ def main() -> None:
         for epoch in range(epochs):
             print(f'Tower {tower_name}, Epoch {epoch+1}/{epochs}')
             # train
-            # lr = learning_rate*((1-epoch/epochs)**0.9)
-            # for param_group in optimizer_of_brain_decoder.param_groups:
-            #     param_group['lr'] = lr
+            lr = learning_rate*((1-epoch/epochs)**0.9)
+            for param_group in optimizer_of_brain_decoder.param_groups:
+                param_group['lr'] = lr
             trained_model, train_loss, total_memory, mem_reserved = train(device=device, 
                                                                           model=decoder_model, 
                                                                           loss_fn=decoder_loss, 
@@ -289,13 +307,6 @@ def main() -> None:
     # Generate
     elif task == 'g':   
         from models import load_blip_models
-        def __concatenate_embeddings__(img_emb : np.ndarray, txt_emb : np.ndarray) -> np.ndarray:
-            assert img_emb.shape == (16, 768), f'img_emb={img_emb.shape} should be (16, 768)'
-            assert txt_emb.shape == (61, 768), f'txt_emb={txt_emb.shape} should be (61, 768)'
-            result = np.concatenate((txt_emb[:2, :], img_emb, txt_emb[2:, :]), axis=0)
-            assert result.shape == (77, 768), f'result.shape={result.shape} should be (77, 768)'
-            return result
-        
         def __merge_images_with_separators__(
                 images_dict : dict[str, Image.Image], saved_dir_path : str,
                 separator_width : int = 10, separator_color : tuple[int, int, int] = (255, 255, 255)
@@ -315,6 +326,8 @@ def main() -> None:
             new_img.save(join_paths(saved_dir_path, f'{name}.png'))
     
         blip_diffusion_model, _, _ = load_blip_models(mode = 'diffusion')
+        # save a null image and null string
+        
         blip2t5_model, blip2t5_vis_processors, _ = load_blip_models(mode='caption') 
         prompt = configs_dict['blip_caption']['prompt']
         uncond_embedding = torch.from_numpy(uncond_embedding).to(device)
@@ -324,62 +337,66 @@ def main() -> None:
         test_dirs_path_dict = {key:test_dirs_path_dict[key] for key in sorted_keys}
         caption_maeloss = read_json_file(join_paths(saved_test_results_dir_path, 'caption_maeloss.json'))
         caption_cossimi = read_json_file(join_paths(saved_test_results_dir_path, 'caption_cossimi.json'))
-        # image_maeloss   = read_json_file(join_paths(saved_test_results_dir_path, 'image_maeloss.json'))
-        # image_cossimi   = read_json_file(join_paths(saved_test_results_dir_path, 'image_cossimi.json'))
+        image_maeloss   = read_json_file(join_paths(saved_test_results_dir_path, 'image_maeloss.json'))
+        image_cossimi   = read_json_file(join_paths(saved_test_results_dir_path, 'image_cossimi.json'))
         for index, dir_path in test_dirs_path_dict.items():
-            print(f'Generating {index} / {len(test_dirs_path_dict)}')
-            coco_matrix = np.load(join_paths(dir_path, 'coco.npy'), allow_pickle=True)
-            coco = Image.fromarray(coco_matrix).convert('RGB')
-            # bravo_img = np.load(join_paths(dir_path, 'bravo_img.npy'), allow_pickle=True)
-            bravo_cap = np.load(join_paths(dir_path, 'bravo_cap.npy'), allow_pickle=True)
-            blip_img  = np.load(join_paths(dir_path, 'blip_img.npy' ), allow_pickle=True)
-            blip_cap  = np.load(join_paths(dir_path, 'blip_cap.npy' ), allow_pickle=True)
+            if index in [0,1,2,3,15,19,118, 208, 600, 641, 661, 1187,1530, 1706]:
+                print(f'Generating {index} / {len(test_dirs_path_dict)}')
+                coco_matrix = np.load(join_paths(dir_path, 'coco.npy'), allow_pickle=True)
+                coco = Image.fromarray(coco_matrix).convert('RGB')
+                bravo_img = np.load(join_paths(dir_path, 'bravo_img.npy'), allow_pickle=True)
+                bravo_cap = np.load(join_paths(dir_path, 'bravo_cap.npy'), allow_pickle=True)
+                blip_img  = np.load(join_paths(dir_path, 'blip_img.npy' ), allow_pickle=True)
+                blip_cap  = np.load(join_paths(dir_path, 'blip_cap.npy' ), allow_pickle=True)
 
-            hidden_state_dict = {
-                'blipdiffusion'    : __concatenate_embeddings__(img_emb=blip_img , txt_emb=blip_cap),
-                'bravo' : __concatenate_embeddings__(img_emb=blip_img , txt_emb=bravo_cap),
-                # 'image'   : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=blip_cap ),
-                # 'img+cap' : __concatenate_embeddings__(img_emb=bravo_img, txt_emb=bravo_cap)
-            }
-            images_dict = {
-                'coco' : coco
-            }
-            captions_dict = {}
-            for key in hidden_state_dict:
-                hidden_state = hidden_state_dict[key]
-                assert hidden_state.shape == position_embedding.shape, f'hidden_state.shape={hidden_state.shape} != position_embedding.shape={position_embedding.shape}'
-                hidden_state += position_embedding
-                hidden_state = torch.from_numpy(hidden_state).unsqueeze(0).to(device)
-                assert hidden_state.shape == uncond_embedding.shape, f'{hidden_state.shape} != {uncond_embedding.shape}'
-                generated_image = blip_diffusion_model.generate_image_via_embedding(
-                                                        uncond_embedding=uncond_embedding,
-                                                        hidden_states=hidden_state,
-                                                        causal_attention_mask=causal_attention_mask,
-                                                        seed=iter_seed,
-                                                        guidance_scale=guidance_scale,
-                                                        height=coco_matrix.shape[0],
-                                                        width=coco_matrix.shape[1],
-                                                        num_inference_steps=num_inference_steps,
-                                                    )
-                images_dict[key] = generated_image.convert('RGB')
-                start_time = time.time()
-                image = blip2t5_vis_processors['eval'](images_dict[key]).unsqueeze(0).to(device)
-                caption = blip2t5_model.generate({'image' : image, 'prompt' : prompt},
-                                                      max_length=100, min_length=30)
-                captions_dict[key] = caption[0]
-                end_time = time.time()
-                print(f'Time taken to generate caption for {key}: {end_time - start_time:.4f} seconds.')
-            
-            __merge_images_with_separators__(images_dict=images_dict, saved_dir_path=dir_path)
-            captions_json_path = join_paths(dir_path, 'captions.json')
-            blip_caption_dict = {'blip_caption' : read_json_file(captions_json_path)['blip_caption']}
-            all_captions = merge_dicts_if_no_conflict(dict1=blip_caption_dict, dict2=captions_dict)
-            all_captions['caption_maeloss'] = caption_maeloss[str(index)]
-            all_captions['caption_cossimi'] = caption_cossimi[str(index)]
-            write_json_file(captions_json_path, all_captions)
-            for k, v in all_captions.items():
-                print(f'{k}: {v}')
-            print()
+                hidden_state_dict = {
+                    'blipIblipC'   : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img , txt_emb=blip_cap),
+                    'blipIbravoC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img , txt_emb=bravo_cap),
+                    'bravoIblipC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=blip_cap ),
+                    'nullInullC'   : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=null_cap_embedding),
+                    'nullIbravoC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=bravo_cap),
+                    'bravoInullC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=null_cap_embedding),
+                    'bravoIbravoC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=bravo_cap),
+                }
+                images_dict = {
+                    'coco' : coco
+                }
+                captions_dict = {}
+                for key in hidden_state_dict:
+                    hidden_state = hidden_state_dict[key]
+                    assert hidden_state.shape == position_embedding.shape, f'hidden_state.shape={hidden_state.shape} != position_embedding.shape={position_embedding.shape}'
+                    hidden_state += position_embedding
+                    hidden_state = torch.from_numpy(hidden_state).unsqueeze(0).to(device)
+                    assert hidden_state.shape == uncond_embedding.shape, f'{hidden_state.shape} != {uncond_embedding.shape}'
+                    generated_image = blip_diffusion_model.generate_image_via_embedding(
+                                                            uncond_embedding=uncond_embedding,
+                                                            hidden_states=hidden_state,
+                                                            causal_attention_mask=causal_attention_mask,
+                                                            seed=iter_seed,
+                                                            guidance_scale=guidance_scale,
+                                                            height=coco_matrix.shape[0],
+                                                            width=coco_matrix.shape[1],
+                                                            num_inference_steps=num_inference_steps,
+                                                        )
+                    images_dict[key] = generated_image.convert('RGB')
+                    start_time = time.time()
+                    image = blip2t5_vis_processors['eval'](images_dict[key]).unsqueeze(0).to(device)
+                    caption = blip2t5_model.generate({'image' : image, 'prompt' : prompt},
+                                                          max_length=100, min_length=30)
+                    captions_dict[key] = caption[0]
+                    end_time = time.time()
+                    print(f'Time taken to generate caption for {key}: {end_time - start_time:.4f} seconds.')
+
+                __merge_images_with_separators__(images_dict=images_dict, saved_dir_path=dir_path)
+                captions_json_path = join_paths(dir_path, 'captions.json')
+                blip_caption_dict = {'blip_caption' : read_json_file(captions_json_path)['blip_caption']}
+                all_captions = merge_dicts_if_no_conflict(dict1=blip_caption_dict, dict2=captions_dict)
+                # all_captions['caption_maeloss'] = caption_maeloss[str(index)]
+                # all_captions['caption_cossimi'] = caption_cossimi[str(index)]
+                write_json_file(captions_json_path, all_captions)
+                for k, v in all_captions.items():
+                    print(f'{k}: {v}')
+                print()
 
     else:
         raise ValueError(f'Task should be either [train test generate generation], but got {task}.')
