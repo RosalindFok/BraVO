@@ -85,8 +85,8 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
 
     uncond_embedding = np.load(uncond_embedding_path, allow_pickle=True)
     assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} != (1, 77, 768)'
-    position_embedding = np.squeeze(np.load(position_embeddings_path, allow_pickle=True))
-    assert position_embedding.shape == (77, 768), f'position_embeddings.shape={position_embedding.shape} != (77, 768)'
+    position_embeddings = np.squeeze(np.load(position_embeddings_path, allow_pickle=True))
+    assert position_embeddings.shape == (77, 768), f'position_embeddings.shape={position_embeddings.shape} != (77, 768)'
     causal_attention_mask = np.load(causal_attention_mask_path, allow_pickle=True)
     assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask.shape={causal_attention_mask.shape} != (1, 1, 77, 77)'
     null_sample_hidden_states = np.load(null_sample_hidden_states_path, allow_pickle=True)
@@ -100,6 +100,7 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
             continue
         # load blip model
         blip2_feature_extractor, bfe_vis_processors, _ = load_blip_models(mode = 'feature')
+
         # In json, index:string_path
         strings_path = read_json_file(json_path)
         # In hdf5, index:{image ,  fmri ,  hidden_states}
@@ -117,8 +118,8 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
                 shutil.copy(src=strings_path[index], dst=join_paths(idx_dir_path, 'strings.json'))
                 # blip output
                 hidden_states = np.squeeze(file[index]['hidden_states'][:]) # (77, 768)
-                assert hidden_states.shape == position_embedding.shape, f'hidden_states.shape={hidden_states.shape} != {position_embedding.shape}'
-                hidden_states_minus_position_embedding = hidden_states - position_embedding
+                assert hidden_states.shape == position_embeddings.shape, f'hidden_states.shape={hidden_states.shape} != position_embeddings.shape={position_embeddings.shape}'
+                hidden_states_minus_position_embedding = hidden_states - position_embeddings
                 np.save(file=join_paths(idx_dir_path, 'hidden_states_minus_position_embedding.npy'), arr=hidden_states_minus_position_embedding)
                 # coco image
                 image = file[index]['image'][:]
@@ -151,18 +152,19 @@ def make_nsd_dataset(subj_path : str, mask_data : np.ndarray, thresholds : list[
         with open(all_done_path, 'w') as f:
             f.write('Done')
     
-    dataPoint = namedtuple('dataPoint', ['uncond_embedding', 'position_embedding', 'causal_attention_mask', 
-                                         'null_sample_hidden_states', 'regions_saved_dir_path'
-                                        ])(uncond_embedding, position_embedding, causal_attention_mask, 
-                                          null_sample_hidden_states, regions_saved_dir_path
-                                        )
-    return dataPoint
+    return namedtuple('dataPoint', ['uncond_embedding', 'position_embeddings', 'causal_attention_mask', 
+                                    'null_sample_hidden_states', 'regions_saved_dir_path'
+                                   ])(uncond_embedding, position_embeddings, causal_attention_mask, 
+                                      null_sample_hidden_states, regions_saved_dir_path
+                                   )
+     
 
-NSD_Dataset_DataPoint = namedtuple('NSD_Dataset_DataPoint', ['index', 'coco_image', 'masked_fmri', 'masked_fmri_embedding',
-                                     'blip_image_embedding', 
-                                     'blip_caption_embedding_fixed', 'blip_caption_embedding_variable', 
-                                     'strings_json_path'
-                                    ])  
+NSD_Dataset_DataPoint = namedtuple('NSD_Dataset_DataPoint', 
+                                ['index', 'coco_image', 'masked_fmri', 'masked_fmri_embedding',
+                                 'blip_image_embedding', 
+                                 'blip_caption_embedding_fixed', 'blip_caption_embedding_variable', 
+                                 'strings_json_path'
+                                ])  
 class NSD_Dataset(Dataset):
     """
     load proprocessed data from hdf5 file
@@ -181,28 +183,22 @@ class NSD_Dataset(Dataset):
         blip_caption_embedding_fixed, blip_caption_embedding_variable = BLIP_Prior_Tools.split_caption_embedding(blip_caption_embedding)
         masked_fmri = np.load(os.path.join(dir_path, 'masked_fmri.npy'), allow_pickle=True)
         masked_fmri -= np.iinfo(np.int16).min # [-32768, 32767] -> [0, 65535]
-        # masked_fmri /= np.iinfo(np.uint16).max # [0, 65535] -> [0, 1]
         masked_fmri_embedding = np.load(os.path.join(dir_path, 'masked_fmri_embedding.npy'), allow_pickle=True)
         strings_json_path = os.path.join(dir_path, 'strings.json')
         
-        # around
-        blip_image_embedding = np.around(blip_image_embedding, 1) # max=4.3, min=-5.6
-        blip_image_embedding = np.clip(blip_image_embedding, -2.1, 2.1) # max=2.1, min=-2.1
-        blip_image_embedding += 2.1 # max=4.2, min=0
-        blip_image_embedding = (blip_image_embedding*10).astype(np.uint8) # max=42, min=0
-        assert blip_image_embedding.max() <= 42, f'{blip_image_embedding.max()} > 42'
-        # one-hot encoding
-        blip_image_embedding = np.eye(42+1, dtype=np.uint8)[blip_image_embedding] 
-        # ### test
-        # blip_caption_embedding_variable = np.around(blip_caption_embedding_variable, 2) # max=0.16, min=-0.10
-        # blip_caption_embedding_variable += 0.10 # max=0.26, min=0
-        # blip_caption_embedding_variable = (blip_caption_embedding_variable*100).astype(np.uint8) # max=26, min=0 
-        # assert blip_caption_embedding_variable.max() <= 26, f'{blip_caption_embedding_variable.max()} > 26'
-        # blip_caption_embedding_variable = (blip_caption_embedding_variable-blip_caption_embedding_variable.min()) / (blip_caption_embedding_variable.max()-blip_caption_embedding_variable.min())
+        # # around
+        blip_image_embedding = np.clip(blip_image_embedding, -2.1, 2.1)
+        # blip_image_embedding = np.around(blip_image_embedding, 1) # max=4.3, min=-5.6
+        # blip_image_embedding = np.clip(blip_image_embedding, -2.1, 2.1) # max=2.1, min=-2.1
+        # blip_image_embedding += 2.1 # max=4.2, min=0
+        # blip_image_embedding = (blip_image_embedding*10 + 1).astype(np.uint8) # max=43, min=1
+        # assert blip_image_embedding.max() <= 42, f'{blip_image_embedding.max()} > 42'
+        # # one-hot encoding
+        # blip_image_embedding = np.eye(42+1, dtype=np.uint8)[blip_image_embedding] 
 
         # ndarray -> tensor
         coco_image = torch.tensor(coco_image, dtype=torch.float32)                       # (425, 425, 3)
-        masked_fmri = torch.tensor(masked_fmri, dtype=torch.float32)                     # (K,)
+        masked_fmri = torch.tensor(masked_fmri, dtype=torch.int32)                     # (K,)
         masked_fmri_embedding = torch.tensor(masked_fmri_embedding, dtype=torch.float32) # (32, 768)
         blip_image_embedding = torch.tensor(blip_image_embedding, dtype=torch.float32)   # (16, 768, 43)
         blip_caption_embedding_fixed = torch.tensor(blip_caption_embedding_fixed, dtype=torch.float32)       # (3, 768)

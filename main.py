@@ -101,20 +101,21 @@ def test(
                                                                         blip_caption_embedding_fixed, 
                                                                         blip_caption_embedding_variable, 
                                                                         strings_json_paths):
-                hsi = np.argmax(hsi, axis=-1).astype(np.float32)
-                hsi /= 10
-                hsi -= 2.1
-                hsi = np.around(hsi, 1)
+                # hsi = np.argmax(hsi, axis=-1).astype(np.float32)
+                # hsi /= 10.0
+                # hsi -= 2.1
+                # hsi = np.around(hsi, 1)
                 # hsc_var *= 0.26
                 # hsc_var -= 0.1
                 true_emb = hsi if tower_name in ['image', 'i'] else hsc_var
                 save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
                 if tower_name in ['image', 'i']:
                     # pass
-                    pred_emb = np.argmax(pred_emb, axis=-1).astype(np.float32)
-                    pred_emb /= 10
-                    pred_emb -= 2.1
-                    pred_emb = np.around(pred_emb, 1)
+                    # pred_emb = np.argmax(pred_emb, axis=-1).astype(np.float32)
+                    # pred_emb /= 10
+                    # pred_emb -= 2.1
+                    # pred_emb = np.around(pred_emb, 1)
+                    pass
                 elif tower_name in ['text', 't', 'caption', 'c']:
                     pass
                     # pred_emb = (pred_emb - pred_emb.min()) / (pred_emb.max() - pred_emb.min())
@@ -175,7 +176,7 @@ def main() -> None:
     # dataset name
     dataset_name = configs_dict['dataset_name']
     # train brain decoder
-    batch_size = configs_dict['train_decoder']['batch_size'] * devices_num
+    batch_size = configs_dict['train_decoder']['batch_size']
     learning_rate = configs_dict['train_decoder']['learning_rate']
     epochs = configs_dict['train_decoder']['epochs']
     # roi
@@ -209,7 +210,7 @@ def main() -> None:
     mask_data, thresholds, labels_string = fetch_nsd_rois_and_labels(subj_path=sujb_path, rois_setup=rois_setup)
     arrays_point = make_nsd_dataset(subj_path=sujb_path, mask_data=mask_data, thresholds=thresholds, labels_string=labels_string)
     uncond_embedding = arrays_point.uncond_embedding
-    position_embedding = arrays_point.position_embedding
+    position_embeddings = arrays_point.position_embeddings
     causal_attention_mask = arrays_point.causal_attention_mask
     null_sample_hidden_states = arrays_point.null_sample_hidden_states
     null_img_embedding, null_cap_embedding = BLIP_Prior_Tools.split_and_concat(null_sample_hidden_states.squeeze())
@@ -224,7 +225,7 @@ def main() -> None:
     # the path of testing results
     saved_test_results_dir_path = join_paths(test_results_dir_path, *path_info[:-1])
     check_and_make_dirs(saved_test_results_dir_path)
-    
+
     # Train-Valid and Test
     if task == 't':
         # dataloader
@@ -233,7 +234,11 @@ def main() -> None:
         test_dataloader  = DataLoader(dataset=NSD_Dataset(join_paths(regions_saved_dir_path, 'test')),  
                                       batch_size=batch_size, shuffle=False, num_workers=num_workers)
         # Loss function
-        decoder_loss = Decoder_loss(w1=1, w2=1, w3=0) 
+        if tower_name in ['image', 'i']:
+            # decoder_loss = torch.nn.CrossEntropyLoss()
+            decoder_loss = Decoder_loss(w1=1, w2=1, w3=0)
+        elif tower_name in ['text', 't', 'caption', 'c']:
+            decoder_loss = Decoder_loss(w1=1, w2=1, w3=0) 
         # Network
         light_loader = next(iter(test_dataloader))
         
@@ -261,9 +266,9 @@ def main() -> None:
         for epoch in range(epochs):
             print(f'Tower {tower_name}, Epoch {epoch+1}/{epochs}')
             # train
-            lr = learning_rate*((1-epoch/epochs)**0.9)
-            for param_group in optimizer_of_brain_decoder.param_groups:
-                param_group['lr'] = lr
+            # lr = learning_rate*((1-epoch/epochs)**0.9)
+            # for param_group in optimizer_of_brain_decoder.param_groups:
+            #     param_group['lr'] = lr
             trained_model, train_loss, total_memory, mem_reserved = train(device=device, 
                                                                           model=decoder_model, 
                                                                           loss_fn=decoder_loss, 
@@ -315,7 +320,7 @@ def main() -> None:
             for name, image in images_dict.items():
                 names.append(name)
                 images.append(image)
-            name = '_'.join(names)
+            name = '__'.join(names)
             total_width = sum(image.width for image in images) + separator_width * (len(images) - 1)  
             max_height = max(image.height for image in images)  
             new_img = Image.new('RGB', (total_width, max_height), separator_color)  
@@ -349,14 +354,23 @@ def main() -> None:
                 blip_img  = np.load(join_paths(dir_path, 'blip_img.npy' ), allow_pickle=True)
                 blip_cap  = np.load(join_paths(dir_path, 'blip_cap.npy' ), allow_pickle=True)
 
+                ### test
+                null_img_embedding = np.zeros_like(null_img_embedding)
+                null_cap_embedding = np.zeros_like(null_cap_embedding)
+                # bravo_cap = blip_cap + 0.4
+                # bravo_img = blip_img + 0.4
+                ### test
+
                 hidden_state_dict = {
-                    'blipIblipC'   : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img , txt_emb=blip_cap),
-                    'blipIbravoC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img , txt_emb=bravo_cap),
-                    'bravoIblipC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=blip_cap ),
-                    'nullInullC'   : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=null_cap_embedding),
-                    'nullIbravoC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=bravo_cap),
-                    'bravoInullC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=null_cap_embedding),
-                    'bravoIbravoC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=bravo_cap),
+                    'blipI+blipC'   : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img , txt_emb=blip_cap),
+                    'blipI+bravoC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img , txt_emb=bravo_cap),
+                    'bravoI+blipC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=blip_cap ),
+                    'nullI+nullC'   : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=null_cap_embedding),
+                    'nullI+blipC'   : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=blip_cap),
+                    'blipI+nullC'   : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img, txt_emb=null_cap_embedding),
+                    'nullI+bravoC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=bravo_cap),
+                    'bravoI+nullC'  : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=null_cap_embedding),
+                    'bravoI+bravoC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=bravo_img, txt_emb=bravo_cap),
                 }
                 images_dict = {
                     'coco' : coco
@@ -364,8 +378,8 @@ def main() -> None:
                 captions_dict = {}
                 for key in hidden_state_dict:
                     hidden_state = hidden_state_dict[key]
-                    assert hidden_state.shape == position_embedding.shape, f'hidden_state.shape={hidden_state.shape} != position_embedding.shape={position_embedding.shape}'
-                    hidden_state += position_embedding
+                    assert hidden_state.shape == position_embeddings.shape, f'hidden_state.shape={hidden_state.shape} != position_embeddings.shape={position_embeddings.shape}'
+                    hidden_state += position_embeddings
                     hidden_state = torch.from_numpy(hidden_state).unsqueeze(0).to(device)
                     assert hidden_state.shape == uncond_embedding.shape, f'{hidden_state.shape} != {uncond_embedding.shape}'
                     generated_image = blip_diffusion_model.generate_image_via_embedding(

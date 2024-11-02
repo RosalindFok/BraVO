@@ -21,8 +21,8 @@ class Decoder_loss(nn.modules.loss._Loss):
         maeloss = nn.L1Loss()(input, target)
         assert not torch.isnan(maeloss), f'MAE loss is nan: {maeloss}'
         # MSE Loss
-        # input_01 = torch.where(input > 0.5, torch.tensor(1., dtype=input.dtype, device=input.device), torch.tensor(0., dtype=torch.float64, device=input.device))
-        # target_01 = torch.where(target > 0.5, torch.tensor(1., dtype=target.dtype, device=target.device), torch.tensor(0., dtype=torch.float64, device=target.device))
+        input_01 = torch.where(input > 0, torch.tensor(1., dtype=input.dtype, device=input.device), torch.tensor(0., dtype=torch.float64, device=input.device))
+        target_01 = torch.where(target > 0, torch.tensor(1., dtype=target.dtype, device=target.device), torch.tensor(0., dtype=torch.float64, device=target.device))
         mseloss = nn.MSELoss()(input, target)
         assert not torch.isnan(mseloss), f'MSE loss is nan: {mseloss}'
         # COS Loss
