@@ -38,7 +38,8 @@ def train(
             input_embedding = batches.masked_fmri.to(device)
             target_embedding = batches.blip_image_embedding.to(device)
         elif tower_name in ['text', 't', 'caption', 'c']:
-            input_embedding = batches.masked_fmri_embedding.to(device)
+            input_embedding = batches.masked_fmri.to(device)
+            # input_embedding = batches.masked_fmri_embedding.to(device)
             target_embedding = batches.blip_caption_embedding_variable.to(device)
         else:
             raise ValueError(f'tower_name={tower_name} is not supported')
@@ -74,9 +75,10 @@ def test(
         return array
     
     get_mae_loss = lambda y_pred, y_true: float(np.mean(np.abs(y_pred.flatten()-y_true.flatten())))
+    get_mse_loss = lambda y_pred, y_true: float(np.mean((y_pred.flatten()-y_true.flatten())**2))
     get_cosine_similarity = lambda y_pred, y_true: float(np.dot(y_pred, y_true) / (np.linalg.norm(y_pred) * np.linalg.norm(y_true)))
     model.eval()
-    maeloss_dict, cossimi_dict = {}, {}
+    maeloss_dict, mseloss_dict, cossimi_dict = {}, {}, {}  
     mem_reserved_list = []
     with torch.no_grad():
         desc = 'Testing' if saved_test_results_dir_path is not None else 'Validating'
@@ -85,7 +87,8 @@ def test(
             if tower_name in ['image', 'i']:
                 input_embedding = batches.masked_fmri.to(device)
             elif tower_name in ['text', 't', 'caption', 'c']:
-                input_embedding = batches.masked_fmri_embedding.to(device)
+                input_embedding = batches.masked_fmri.to(device)
+                # input_embedding = batches.masked_fmri_embedding.to(device)
             # Forward
             pred_embedding  = model(input_embedding)
             index = index.cpu().numpy()
@@ -101,27 +104,10 @@ def test(
                                                                         blip_caption_embedding_fixed, 
                                                                         blip_caption_embedding_variable, 
                                                                         strings_json_paths):
-                # hsi = np.argmax(hsi, axis=-1).astype(np.float32)
-                # hsi /= 10.0
-                # hsi -= 2.1
-                # hsi = np.around(hsi, 1)
-                # hsc_var *= 0.26
-                # hsc_var -= 0.1
                 true_emb = hsi if tower_name in ['image', 'i'] else hsc_var
                 save_tag = '_img' if tower_name in ['image', 'i'] else '_cap'
-                if tower_name in ['image', 'i']:
-                    # pass
-                    # pred_emb = np.argmax(pred_emb, axis=-1).astype(np.float32)
-                    # pred_emb /= 10
-                    # pred_emb -= 2.1
-                    # pred_emb = np.around(pred_emb, 1)
-                    pass
-                elif tower_name in ['text', 't', 'caption', 'c']:
-                    pass
-                    # pred_emb = (pred_emb - pred_emb.min()) / (pred_emb.max() - pred_emb.min())
-                    # pred_emb *= 0.26
-                    # pred_emb -= 0.1
                 maeloss_dict[int(idx)] = get_mae_loss(pred_emb, true_emb)
+                mseloss_dict[int(idx)] = get_mse_loss(pred_emb, true_emb)
                 cossimi_dict[int(idx)] = get_cosine_similarity(pred_emb.flatten(), true_emb.flatten())
                 if saved_test_results_dir_path is not None:
                     saved_path = join_paths(saved_test_results_dir_path, str(idx))
@@ -140,20 +126,27 @@ def test(
 
     # Save the MAE Loss and Cosine Similarity
     avg_maeloss = sum([value for value in maeloss_dict.values()])/len(maeloss_dict)
+    avg_mseloss = sum([value for value in mseloss_dict.values()])/len(mseloss_dict)
     avg_cossimi = sum([value for value in cossimi_dict.values()])/len(cossimi_dict)
     max_maeloss_key = max(maeloss_dict, key=maeloss_dict.get)
     min_maeloss_key = min(maeloss_dict, key=maeloss_dict.get)
+    max_mseloss_key = max(mseloss_dict, key=mseloss_dict.get)
+    min_mseloss_key = min(mseloss_dict, key=mseloss_dict.get)
     max_cossimi_key = max(cossimi_dict, key=cossimi_dict.get)
     min_cossimi_key = min(cossimi_dict, key=cossimi_dict.get)
     print(f'Average MAE loss: {avg_maeloss:.6f}, Max MAE Loss is {max_maeloss_key}: {maeloss_dict[max_maeloss_key]:.6f}, Min MAE Loss is {min_maeloss_key}: {maeloss_dict[min_maeloss_key]:.6f}')
+    print(f'Average MSE loss: {avg_mseloss:.6f}, Max MSE Loss is {max_mseloss_key}: {mseloss_dict[max_mseloss_key]:.6f}, Min MSE Loss is {min_mseloss_key}: {mseloss_dict[min_mseloss_key]:.6f}')
     print(f'Average COS simi: {avg_cossimi:.6f}, Max COS Simi is {max_cossimi_key}: {cossimi_dict[max_cossimi_key]:.6f}, Min COS Simi is {min_cossimi_key}: {cossimi_dict[min_cossimi_key]:.6f}')
         
     if saved_test_results_dir_path is not None:
         maeloss_dict = {'max key' : max_maeloss_key, 'max val' : maeloss_dict[max_maeloss_key],
                         'min key' : min_maeloss_key, 'min val' : maeloss_dict[min_maeloss_key], **maeloss_dict}
+        mseloss_dict = {'max key' : max_mseloss_key, 'max val' : mseloss_dict[max_mseloss_key],
+                        'min key' : min_mseloss_key, 'min val' : mseloss_dict[min_mseloss_key], **mseloss_dict}
         cossimi_dict = {'max key' : max_cossimi_key, 'max val' : cossimi_dict[max_cossimi_key],
                         'min key' : min_cossimi_key, 'min val' : cossimi_dict[min_cossimi_key], **cossimi_dict}
         write_json_file(join_paths(saved_test_results_dir_path, f'{tower_name}_maeloss.json'), maeloss_dict)
+        write_json_file(join_paths(saved_test_results_dir_path, f'{tower_name}_mseloss.json'), mseloss_dict)
         write_json_file(join_paths(saved_test_results_dir_path, f'{tower_name}_cossimi.json'), cossimi_dict)
 
     # Monitor GPU memory usage
@@ -234,11 +227,12 @@ def main() -> None:
         test_dataloader  = DataLoader(dataset=NSD_Dataset(join_paths(regions_saved_dir_path, 'test')),  
                                       batch_size=batch_size, shuffle=False, num_workers=num_workers)
         # Loss function
-        if tower_name in ['image', 'i']:
-            # decoder_loss = torch.nn.CrossEntropyLoss()
-            decoder_loss = Decoder_loss(w1=1, w2=1, w3=0)
-        elif tower_name in ['text', 't', 'caption', 'c']:
-            decoder_loss = Decoder_loss(w1=1, w2=1, w3=0) 
+        decoder_loss = Decoder_loss(w1=1, w2=1, w3=0)
+        # if tower_name in ['image', 'i']:
+        #     # decoder_loss = torch.nn.CrossEntropyLoss()
+        #     decoder_loss = Decoder_loss(w1=1, w2=1, w3=0)
+        # elif tower_name in ['text', 't', 'caption', 'c']:
+        #     decoder_loss = Decoder_loss(w1=1, w2=1, w3=0) 
         # Network
         light_loader = next(iter(test_dataloader))
         
@@ -247,7 +241,8 @@ def main() -> None:
             output_shape = light_loader.blip_image_embedding.shape[1:] 
             decoder_model = Image_Decoder(input_shape=input_shape, output_shape=output_shape)
         elif tower_name in ['text', 't', 'caption', 'c']:
-            input_shape = light_loader.masked_fmri_embedding.shape[1:]
+            input_shape = light_loader.masked_fmri.shape[1:]
+            # input_shape = light_loader.masked_fmri_embedding.shape[1:]
             output_shape = light_loader.blip_caption_embedding_variable.shape[1:] 
             decoder_model = Caption_Decoder(input_shape=input_shape, output_shape=output_shape)
         print(f'Input Shape  = {input_shape}')
@@ -331,8 +326,6 @@ def main() -> None:
             new_img.save(join_paths(saved_dir_path, f'{name}.png'))
     
         blip_diffusion_model, _, _ = load_blip_models(mode = 'diffusion')
-        # save a null image and null string
-        
         blip2t5_model, blip2t5_vis_processors, _ = load_blip_models(mode='caption') 
         prompt = configs_dict['blip_caption']['prompt']
         uncond_embedding = torch.from_numpy(uncond_embedding).to(device)
@@ -345,7 +338,7 @@ def main() -> None:
         image_maeloss   = read_json_file(join_paths(saved_test_results_dir_path, 'image_maeloss.json'))
         image_cossimi   = read_json_file(join_paths(saved_test_results_dir_path, 'image_cossimi.json'))
         for index, dir_path in test_dirs_path_dict.items():
-            if index in [0,1,2,3,15,19,118, 208, 600, 641, 661, 1187,1530, 1706]:
+            if index in [0,15,19,118, 208, 600, 641, 661, 1187,1530, 1706]:
                 print(f'Generating {index} / {len(test_dirs_path_dict)}')
                 coco_matrix = np.load(join_paths(dir_path, 'coco.npy'), allow_pickle=True)
                 coco = Image.fromarray(coco_matrix).convert('RGB')
@@ -355,10 +348,8 @@ def main() -> None:
                 blip_cap  = np.load(join_paths(dir_path, 'blip_cap.npy' ), allow_pickle=True)
 
                 ### test
-                null_img_embedding = np.zeros_like(null_img_embedding)
-                null_cap_embedding = np.zeros_like(null_cap_embedding)
-                # bravo_cap = blip_cap + 0.4
-                # bravo_img = blip_img + 0.4
+                # null_img_embedding = np.zeros_like(null_img_embedding)
+                # null_cap_embedding = np.zeros_like(null_cap_embedding)
                 ### test
 
                 hidden_state_dict = {
@@ -405,8 +396,10 @@ def main() -> None:
                 captions_json_path = join_paths(dir_path, 'captions.json')
                 blip_caption_dict = {'blip_caption' : read_json_file(captions_json_path)['blip_caption']}
                 all_captions = merge_dicts_if_no_conflict(dict1=blip_caption_dict, dict2=captions_dict)
-                # all_captions['caption_maeloss'] = caption_maeloss[str(index)]
-                # all_captions['caption_cossimi'] = caption_cossimi[str(index)]
+                all_captions['caption_maeloss'] = caption_maeloss[str(index)]
+                all_captions['caption_cossimi'] = caption_cossimi[str(index)]
+                all_captions['image_maeloss']   = image_maeloss[str(index)]
+                all_captions['image_cossimi']   = image_cossimi[str(index)]
                 write_json_file(captions_json_path, all_captions)
                 for k, v in all_captions.items():
                     print(f'{k}: {v}')
@@ -418,4 +411,3 @@ def main() -> None:
 if __name__ == '__main__':
     main()
     print('Done.\n\n')
-   

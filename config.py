@@ -8,14 +8,14 @@ configs_dict = {
         'derived_type' : 'surface',
         'roi_name' : 'streams',
         'thresholds' : {
-            'primary_visual_cortex' : [1], # early 
+            'primary_visual_cortex' : [1], # early
             'higher_visual_cortex'  : [5]  # ventral 
         }
     },
 
     'train_decoder' : {
-        'batch_size' : 16, # 256, 
-        'learning_rate' : 2e-6,
+        'batch_size' : 256, 
+        'learning_rate' : 1e-4,
         'epochs' : 50,
     },
 

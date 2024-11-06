@@ -562,7 +562,7 @@ class BlipDiffusion(BaseModel):
                 guidance_scale=guidance_scale,
                 use_inversion=use_ddim,
             )
-
+        
         image = self._latent_to_image(latents)
 
         return image

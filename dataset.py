@@ -186,7 +186,7 @@ class NSD_Dataset(Dataset):
         masked_fmri_embedding = np.load(os.path.join(dir_path, 'masked_fmri_embedding.npy'), allow_pickle=True)
         strings_json_path = os.path.join(dir_path, 'strings.json')
         
-        # # around
+        # around
         blip_image_embedding = np.clip(blip_image_embedding, -2.1, 2.1)
         # blip_image_embedding = np.around(blip_image_embedding, 1) # max=4.3, min=-5.6
         # blip_image_embedding = np.clip(blip_image_embedding, -2.1, 2.1) # max=2.1, min=-2.1
@@ -197,10 +197,10 @@ class NSD_Dataset(Dataset):
         # blip_image_embedding = np.eye(42+1, dtype=np.uint8)[blip_image_embedding] 
 
         # ndarray -> tensor
-        coco_image = torch.tensor(coco_image, dtype=torch.float32)                       # (425, 425, 3)
+        coco_image = torch.tensor(coco_image, dtype=torch.float32)                     # (425, 425, 3)
         masked_fmri = torch.tensor(masked_fmri, dtype=torch.int32)                     # (K,)
         masked_fmri_embedding = torch.tensor(masked_fmri_embedding, dtype=torch.float32) # (32, 768)
-        blip_image_embedding = torch.tensor(blip_image_embedding, dtype=torch.float32)   # (16, 768, 43)
+        blip_image_embedding = torch.tensor(blip_image_embedding, dtype=torch.float32)   # (16, 768)
         blip_caption_embedding_fixed = torch.tensor(blip_caption_embedding_fixed, dtype=torch.float32)       # (3, 768)
         blip_caption_embedding_variable = torch.tensor(blip_caption_embedding_variable, dtype=torch.float32) # (58, 768)
 
