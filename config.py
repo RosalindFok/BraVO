@@ -4,19 +4,21 @@ configs_dict = {
     'subj_id' : 1,
     'dataset_name' : 'NSD', # NSD fMRI_Shape
 
+    'functional_space' : 'func1mm', # func1mm func1pt8mm
+
     'NSD_ROIs' : {
         'derived_type' : 'surface',
         'roi_name' : 'streams',
         'thresholds' : {
-            'primary_visual_cortex' : [1], # early
-            'higher_visual_cortex'  : [5]  # ventral 
+            'primary_visual_cortex' : [1], # early    1 
+            'higher_visual_cortex'  : [5]  # ventral  5
         }
     },
 
     'train_decoder' : {
         'batch_size' : 256, 
-        'learning_rate' : 1e-4,
-        'epochs' : 50,
+        'learning_rate' : 1e-4, # 2e-5,
+        'epochs' : 100,
     },
 
     'blip_diffusion' :{

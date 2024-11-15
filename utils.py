@@ -125,7 +125,7 @@ NSD_saved_dir_path = join_paths(run_saved_dir_path, 'NSD_preprocessed_pairs')
 check_and_make_dirs(NSD_saved_dir_path)
 fmrishape_saved_dir_path = join_paths(run_saved_dir_path, 'fMRIShape_preprocessed_pairs')
 check_and_make_dirs(fmrishape_saved_dir_path)
-sam2_ckpt_dir_path = join_paths(root_dir, 'large_files_for_BraVO', 'SAM2')
+# sam2_ckpt_dir_path = join_paths(root_dir, 'large_files_for_BraVO', 'SAM2')
 # for NSD subj  
 nsd_subject_saved_dir_path = join_paths(NSD_saved_dir_path, f"subj{str(configs_dict['subj_id']).zfill(2)}")
 check_and_make_dirs(nsd_subject_saved_dir_path)
@@ -163,6 +163,14 @@ class BLIP_Prior_Tools:
         assert array_fixed.shape == (3, BLIP_Prior_Tools.embedding_length), f'array_fixed.shape={array_fixed.shape} != (3, 768)'
         assert array_variable.shape == (58, BLIP_Prior_Tools.embedding_length), f'array_variable.shape={array_variable.shape} != (58, 768)'
         return array_fixed, array_variable
+    
+    @staticmethod
+    def concatenate_caption_embedding(fixed_emb : np.ndarray, variable_emb : np.ndarray) -> np.ndarray:
+        assert fixed_emb.shape == (3, BLIP_Prior_Tools.embedding_length), f'fixed_emb={fixed_emb.shape} should be (3, 768)'
+        assert variable_emb.shape == (58, BLIP_Prior_Tools.embedding_length), f'variable_emb={variable_emb.shape} should be (58, 768)'
+        result = np.concatenate((fixed_emb[:-1], variable_emb, fixed_emb[-1].reshape(1, -1)), axis=0)
+        assert result.shape == (BLIP_Prior_Tools.txt_queries_num, BLIP_Prior_Tools.embedding_length), f'result.shape={result.shape} should be (61, 768)'
+        return result
     
     @staticmethod
     def concatenate_embeddings(img_emb : np.ndarray, txt_emb : np.ndarray) -> np.ndarray:

@@ -88,7 +88,7 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
     #     model = nn.DataParallel(model)
     model = model.module if hasattr(model, 'module') else model
     end_time = time.time()
-    print(f'It took {end_time - start_time:.2f} seconds to load the BLIP-2 model {mode}.')
+    print(f'It took {end_time - start_time:.2f} seconds to load the BLIP {mode} model.')
     return model, vis_processors, txt_processors
 
 
@@ -96,7 +96,7 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
 ########################
 ######Brain Decoder#####
 ######################## 
-
+    
 # class Conv_Twice_1d(nn.Module):
 #     def __init__(self, in_channels : int, out_channels : int, kernel_size : int = 3) -> None:
 #         super().__init__()
@@ -575,38 +575,55 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
 #         predicted_tokens = predicted_tokens.to(torch.float32)
 #         return predicted_tokens
 
-class ScaledTanh(nn.Module):
-    def __init__(self, scale : float) -> None:
-        super().__init__()
-        self.scale = scale
-        self.tanh = nn.Tanh()
+# class ScaledTanh(nn.Module):
+#     def __init__(self, scale : float) -> None:
+#         super().__init__()
+#         self.scale = scale
+#         self.tanh = nn.Tanh()
 
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
-        return self.scale * self.tanh(x)
+#     def forward(self, x : torch.Tensor) -> torch.Tensor:
+#         return self.scale * self.tanh(x)
 
-class Caption_Decoder(nn.Module):
-    def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
-        super().__init__()
-        self.input_embedding = nn.Embedding(torch.iinfo(torch.uint16).max+1, output_shape[1])
-        self.convs = nn.Sequential(
-            nn.Conv1d(in_channels=input_shape[0], out_channels=4096, kernel_size=27, padding=13),
-            ScaledTanh(scale=0.6),
-            nn.Conv1d(in_channels=4096, out_channels=2048, kernel_size=27, padding=13),
-            ScaledTanh(scale=0.6),
-            nn.Conv1d(in_channels=2048, out_channels=1024, kernel_size=27, padding=13),
-            ScaledTanh(scale=0.6),
-            nn.Conv1d(in_channels=1024, out_channels=512, kernel_size=27, padding=13),
-            ScaledTanh(scale=0.6),
-            nn.Conv1d(in_channels=512, out_channels=output_shape[0], kernel_size=27, padding=13)
-        )
-        self.clip = nn.Hardtanh(min_val=-0.104751, max_val=0.16060367)
+# class Caption_Decoder(nn.Module):
+#     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
+#         super().__init__()
+#         self.input_embedding = nn.Embedding(torch.iinfo(torch.uint16).max+1, output_shape[1])
+#         self.convs = nn.Sequential(
+#             nn.Conv1d(in_channels=input_shape[0], out_channels=4096, kernel_size=27, padding=13),
+#             ScaledTanh(scale=0.6),
+#             nn.Conv1d(in_channels=4096, out_channels=2048, kernel_size=27, padding=13),
+#             ScaledTanh(scale=0.6),
+#             nn.Conv1d(in_channels=2048, out_channels=1024, kernel_size=27, padding=13),
+#             ScaledTanh(scale=0.6),
+#             nn.Conv1d(in_channels=1024, out_channels=512, kernel_size=27, padding=13),
+#             ScaledTanh(scale=0.6),
+#             nn.Conv1d(in_channels=512, out_channels=output_shape[0], kernel_size=27, padding=13)
+#         )
+#         self.clip = nn.Hardtanh(min_val=-0.104751, max_val=0.16060367)
 
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
-        x = self.input_embedding(x)
-        x = self.convs(x)
-        x = self.clip(x)
-        return x
-     
+#     def forward(self, x : torch.Tensor) -> torch.Tensor:
+#         x = self.input_embedding(x)
+#         x = self.convs(x)
+#         x = self.clip(x)
+#         return x
+
+# class Caption_Decoder(nn.Module):
+#     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
+#         super().__init__()
+#         self.output_shape = output_shape
+#         self.mlp = nn.Linear(in_features=input_shape[0], out_features=output_shape[0]*output_shape[1])
+#         self.clip = nn.Hardtanh(min_val=-0.104751, max_val=0.16060367)
+
+#     def forward(self, x : torch.Tensor) -> torch.Tensor:
+#         x = x.float()
+#         x /= torch.iinfo(torch.uint16).max
+#         x /= 5
+#         x -= 0.1 # [-0.1, 0.1]
+#         x = self.mlp(x)
+#         x = self.clip(x)
+#         x = x.view(-1, *self.output_shape)
+#         return x
+    
 # class Image_Decoder(nn.Module):
 #     def __init__(self, input_shape : torch.Size, output_shape : torch.Size):
 #         super().__init__()
@@ -626,25 +643,36 @@ class Caption_Decoder(nn.Module):
 #         x = self.clip(x)
 #         return x
 
-class Image_Decoder(nn.Module):
-    def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
+# class Image_Decoder(nn.Module):
+#     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
+#         super().__init__()
+#         self.output_shape = output_shape
+#         self.mlp = nn.Linear(in_features=input_shape[0], out_features=output_shape[0]*output_shape[1])
+#         self.clip = nn.Hardtanh(min_val=-2.1, max_val=2.1)
+#         # self.softmax = nn.Softmax(dim=-1)
+    
+#     def forward(self, x : torch.Tensor) -> torch.Tensor:
+#         x = x.float()
+#         x /= torch.iinfo(torch.uint16).max
+#         x *= 5 
+#         x -= 2.5  # [-2.5, 2.5]
+#         x = self.mlp(x)
+#         x = self.clip(x)
+#         x = x.view(-1, *self.output_shape)
+#         return x
+
+class BraVO_Decoder(nn.Module):
+    def __init__(self, input_shape : torch.Size, output_shape : torch.Size, tower_name : str) -> None:
         super().__init__()
         self.output_shape = output_shape
-        self.mlp = nn.Sequential(
-            # nn.Linear(in_features=input_shape[0], out_features=2048),
-            # ScaledTanh(scale=3.0),
-            # nn.Linear(in_features=2048, out_features=output_shape[1])
-            nn.Linear(in_features=input_shape[0], out_features=output_shape[0]*output_shape[1])
-        )
-        self.clip = nn.Hardtanh(min_val=-2.1, max_val=2.1)
-    
+        self.linear = nn.Linear(in_features=input_shape[0], 
+                                out_features=output_shape[0]*output_shape[1])
+        if tower_name == 'i':
+            self.clip = nn.Hardtanh(min_val=-2.1, max_val=2.1)
+
     def forward(self, x : torch.Tensor) -> torch.Tensor:
-        x = x.float()
-        x /= torch.iinfo(torch.uint16).max
-        x *= 5 
-        x -= 2.5  # [-2.6, 2.5]
-        # x = x.unsqueeze(1).repeat(1, self.output_shape[0], 1)
-        x = self.mlp(x)
+        # x *= 3 # [-3, 3]
+        x = self.linear(x)
         x = self.clip(x)
         x = x.view(-1, *self.output_shape)
         return x
