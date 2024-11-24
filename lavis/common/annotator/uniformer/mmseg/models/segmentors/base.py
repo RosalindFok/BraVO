@@ -220,7 +220,7 @@ class BaseSegmentor(nn.Module):
             img (str or Tensor): The image to be displayed.
             result (Tensor): The semantic segmentation results to draw over
                 `img`.
-            palette (list[list[int]]] | np.ndarray | None): The palette of
+            palette (list[list[int]]] | np.array | None): The palette of
                 segmentation map. If None is given, random palette will be
                 generated. Default: None
             win_name (str): The window name.

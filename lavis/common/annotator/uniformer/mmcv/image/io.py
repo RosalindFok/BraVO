@@ -94,7 +94,7 @@ def _pillow2array(img, flag='color', channel_order='bgr'):
             candidates are 'bgr' and 'rgb'. Default to 'bgr'.
 
     Returns:
-        np.ndarray: The converted numpy array
+        np.array: The converted numpy array
     """
     channel_order = channel_order.lower()
     if channel_order not in ['rgb', 'bgr']:
@@ -170,7 +170,7 @@ def imread(img_or_path, flag='color', channel_order='bgr', backend=None):
     if isinstance(img_or_path, Path):
         img_or_path = str(img_or_path)
 
-    if isinstance(img_or_path, np.ndarray):
+    if isinstance(img_or_path, np.array):
         return img_or_path
     elif is_str(img_or_path):
         check_file_exist(img_or_path,

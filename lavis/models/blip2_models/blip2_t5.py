@@ -183,15 +183,15 @@ class Blip2T5(Blip2Base):
         Returns:
             captions (list): A list of strings of length batch_size * num_captions.
         """
+        
+        # Related with image
         image = samples["image"]
-
         with self.maybe_autocast():
             image_embeds = self.ln_vision(self.visual_encoder(image))
-        image_embeds = image_embeds.float()
+        image_embeds = image_embeds.float() # shape=[bs, 677, 1408]
         image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
             image.device
-        )
-
+        ) # all 1
         query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
         query_output = self.Qformer.bert(
             query_embeds=query_tokens,
@@ -199,14 +199,14 @@ class Blip2T5(Blip2Base):
             encoder_attention_mask=image_atts,
             return_dict=True,
         )
+        inputs_t5 = self.t5_proj(query_output.last_hidden_state) # shape=[bs, 32, 2048]
+        atts_t5 = torch.ones(inputs_t5.size()[:-1], dtype=torch.long).to(image.device) # all 1
 
-        inputs_t5 = self.t5_proj(query_output.last_hidden_state)
-        atts_t5 = torch.ones(inputs_t5.size()[:-1], dtype=torch.long).to(image.device)
-
+        # Related with text(prompt, not caption)
         if "prompt" in samples.keys():
             prompt = samples["prompt"]
         else:
-            prompt = self.prompt
+            prompt = self.prompt # "a photo of"
 
         if isinstance(prompt, str):
             prompt = [prompt] * image.size(0)
@@ -214,18 +214,29 @@ class Blip2T5(Blip2Base):
             assert len(prompt) == image.size(
                 0
             ), "The number of prompts must be equal to the batch size."
-
         input_tokens = self.t5_tokenizer(
             prompt, padding="longest", return_tensors="pt"
-        ).to(image.device)
-
-        encoder_atts = torch.cat([atts_t5, input_tokens.attention_mask], dim=1)
+        ).to(image.device) # class: 'transformers.tokenization_utils_base.BatchEncoding
+        # when prompt is "a photo of", input_tokens.input_ids = [[   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1]]
+        
+        # atts of [image, text]
+        encoder_atts = torch.cat([atts_t5, input_tokens.attention_mask], dim=1) # all 1
 
         with self.maybe_autocast(dtype=torch.bfloat16):
-            inputs_embeds = self.t5_model.encoder.embed_tokens(input_tokens.input_ids)
-            inputs_embeds = torch.cat([inputs_t5, inputs_embeds], dim=1)
-
-            outputs = self.t5_model.generate(
+            inputs_embeds = self.t5_model.encoder.embed_tokens(input_tokens.input_ids) # shape=[bs, 38, 2048]
+            inputs_embeds = torch.cat([inputs_t5, inputs_embeds], dim=1) # shape=[bs, 70, 2048]
+            outputs = self.t5_model.generate( # Word embedding, type=torch.Tensor, shape=[bs, 28]
                 inputs_embeds=inputs_embeds,
                 attention_mask=encoder_atts,
                 do_sample=use_nucleus_sampling,
@@ -237,12 +248,106 @@ class Blip2T5(Blip2Base):
                 repetition_penalty=repetition_penalty,
                 length_penalty=length_penalty,
                 num_return_sequences=num_captions,
-            )
+            )  
+            # each embedding of outputs is a vector of uint, starts with [0,3,9] and ends with [1,0*](num of 0 >= 1)
+            # Translate embedding of outputs into natural language of output_text
             output_text = self.t5_tokenizer.batch_decode(
                 outputs, skip_special_tokens=True
             )
 
         return output_text
+    
+    ### BraVO 
+    @torch.no_grad()
+    def generate_image_embedding(
+        self,
+        samples,
+        use_nucleus_sampling=False,
+        num_beams=5,
+        max_length=30,
+        min_length=1,
+        top_p=None,
+        repetition_penalty=1.0,
+        length_penalty=1.0,
+        num_captions=1,
+        temperature=1,
+    ):
+        """
+        """
+        
+        # Related with image
+        image = samples["image"]
+        with self.maybe_autocast():
+            image_embeds = self.ln_vision(self.visual_encoder(image))
+        image_embeds = image_embeds.float() # shape=[bs, 677, 1408]
+        image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
+            image.device
+        ) # all 1
+        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
+        query_output = self.Qformer.bert(
+            query_embeds=query_tokens,
+            encoder_hidden_states=image_embeds,
+            encoder_attention_mask=image_atts,
+            return_dict=True,
+        )
+        inputs_t5 = self.t5_proj(query_output.last_hidden_state) # shape=[bs, 32, 2048]
+        atts_t5 = torch.ones(inputs_t5.size()[:-1], dtype=torch.long).to(image.device) # all 1
+
+        # Related with text(prompt, not caption)
+        if "prompt" in samples.keys():
+            prompt = samples["prompt"]
+        else:
+            prompt = self.prompt # "a photo of"
+
+        if isinstance(prompt, str):
+            prompt = [prompt] * image.size(0)
+        else:
+            assert len(prompt) == image.size(
+                0
+            ), "The number of prompts must be equal to the batch size."
+        input_tokens = self.t5_tokenizer(
+            prompt, padding="longest", return_tensors="pt"
+        ).to(image.device) # class: 'transformers.tokenization_utils_base.BatchEncoding
+        # when prompt is "a photo of", input_tokens.input_ids = [[   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1],
+        #                                                        [   3,    9, 1202,   13,    1]]
+        
+        # atts of [image, text]
+        encoder_atts = torch.cat([atts_t5, input_tokens.attention_mask], dim=1) # all 1
+
+        with self.maybe_autocast(dtype=torch.bfloat16):
+            inputs_embeds = self.t5_model.encoder.embed_tokens(input_tokens.input_ids) # shape=[bs, 38, 2048]
+            inputs_embeds = torch.cat([inputs_t5, inputs_embeds], dim=1) # shape=[bs, 70, 2048]
+            outputs = self.t5_model.generate( # Word embedding, type=torch.Tensor, shape=[bs, 28]
+                inputs_embeds=inputs_embeds,
+                attention_mask=encoder_atts,
+                do_sample=use_nucleus_sampling,
+                top_p=top_p,
+                temperature=temperature,
+                num_beams=num_beams,
+                max_new_tokens=max_length,
+                min_length=min_length,
+                repetition_penalty=repetition_penalty,
+                length_penalty=length_penalty,
+                num_return_sequences=num_captions,
+            )  
+            # each embedding of outputs is a vector of uint, starts with [0,3,9] and ends with [1,0*](num of 0 >= 1)
+            # Translate embedding of outputs into natural language of output_text
+            output_text = self.t5_tokenizer.batch_decode(
+                outputs, skip_special_tokens=True
+            )
+
+        return output_text
+    ### BraVO 
 
     def predict_answers(
         self,

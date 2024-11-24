@@ -1,6 +1,7 @@
 import time
 import torch  
 import platform
+import numpy as np
 import torch.nn as nn 
 
 __all__ = [
@@ -49,35 +50,35 @@ def get_GPU_memory_usage() -> tuple[float, float]:
 ###### Load BLIPs  #####
 ########################
 
-def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Module, dict, dict]:
+def load_blip_models(mode : str, device : torch.device = device, is_eval : bool = True) -> tuple[nn.Module, dict, dict]:
     from lavis.models import load_model_and_preprocess
     start_time = time.time()
     if mode == 'feature':
         model, vis_processors, txt_processors = load_model_and_preprocess(
                 name='blip2_feature_extractor', # class Blip2Qformer(Blip2Base)
                 model_type='coco', 
-                is_eval=True, 
+                is_eval=is_eval, 
                 device=device
             )
     elif mode == 'diffusion':
         model, vis_processors, txt_processors = load_model_and_preprocess(
                 name='blip_diffusion', # class BlipDiffusion(BaseModel)
                 model_type="base", 
-                is_eval=True, 
+                is_eval=is_eval, 
                 device=device
             )
     elif mode == 'matching':
         model, vis_processors, txt_processors = load_model_and_preprocess(
                 name='blip2_image_text_matching', # class Blip2ITM(Blip2Qformer)
                 model_type='coco', 
-                is_eval=True,
+                is_eval=is_eval,
                 device=device 
             )
     elif mode == 'caption':
         model, vis_processors, txt_processors = load_model_and_preprocess(
                 name='blip2_t5', # blip2_models.blip2_t5.Blip2T5
                 model_type='caption_coco_flant5xl', # pretrain_flant5xl, caption_coco_flant5xl, pretrain_flant5xxl
-                is_eval=True, 
+                is_eval=is_eval, 
                 device=device
             )
     else:
@@ -575,14 +576,14 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
 #         predicted_tokens = predicted_tokens.to(torch.float32)
 #         return predicted_tokens
 
-# class ScaledTanh(nn.Module):
-#     def __init__(self, scale : float) -> None:
-#         super().__init__()
-#         self.scale = scale
-#         self.tanh = nn.Tanh()
+class ScaledTanh(nn.Module):
+    def __init__(self, scale : float) -> None:
+        super().__init__()
+        self.scale = scale
+        self.tanh = nn.Tanh()
 
-#     def forward(self, x : torch.Tensor) -> torch.Tensor:
-#         return self.scale * self.tanh(x)
+    def forward(self, x : torch.Tensor) -> torch.Tensor:
+        return self.scale * self.tanh(x)
 
 # class Caption_Decoder(nn.Module):
 #     def __init__(self, input_shape : torch.Size, output_shape : torch.Size) -> None:
@@ -661,18 +662,79 @@ def load_blip_models(mode : str, device : torch.device = device) -> tuple[nn.Mod
 #         x = x.view(-1, *self.output_shape)
 #         return x
 
-class BraVO_Decoder(nn.Module):
-    def __init__(self, input_shape : torch.Size, output_shape : torch.Size, tower_name : str) -> None:
-        super().__init__()
-        self.output_shape = output_shape
-        self.linear = nn.Linear(in_features=input_shape[0], 
-                                out_features=output_shape[0]*output_shape[1])
-        if tower_name == 'i':
-            self.clip = nn.Hardtanh(min_val=-2.1, max_val=2.1)
+# class BraVO_Decoder(nn.Module):
+#     def __init__(self, input_shape : torch.Size, output_shape : torch.Size, tower_name : str) -> None:
+#         super().__init__()
+#         self.output_shape = output_shape
+#         self.linear = nn.Linear(in_features=input_shape[0], 
+#                                 out_features=output_shape[0]*output_shape[1])
+#         if tower_name == 'i':
+#             # self.clip = nn.Hardtanh(min_val=-2.1, max_val=2.1)
+#             self.clip = nn.Sigmoid()
 
-    def forward(self, x : torch.Tensor) -> torch.Tensor:
-        # x *= 3 # [-3, 3]
-        x = self.linear(x)
-        x = self.clip(x)
-        x = x.view(-1, *self.output_shape)
-        return x
+#     def forward(self, x : torch.Tensor) -> torch.Tensor:
+#         # x *= 3 # [-3, 3]
+#         x = self.linear(x)
+#         x = self.clip(x)
+#         x = x.view(-1, *self.output_shape)
+#         return x
+
+''' input blip_embedding + fMRI; output image'''
+class BraVO_Decoder(nn.Module):
+    def __init__(self, input_shape : torch.Size, target_embedding_shape : torch.Size, 
+                 target_image_shape : torch.Size,
+                 uncond_embedding : torch.Tensor,
+                 position_embeddings : torch.Tensor,
+                 causal_attention_mask : torch.Tensor,
+                 caption_embedding_fixed : torch.Tensor,
+                 sets : dict[str, any]
+                 ) -> None:
+        super().__init__()
+        self.target_embedding_shape = target_embedding_shape
+        self.image_shape = target_image_shape
+
+        self.uncond_embedding = uncond_embedding
+        self.position_embeddings = position_embeddings
+        self.causal_attention_mask = causal_attention_mask
+        self.caption_embedding_fixed = caption_embedding_fixed
+        self.sets = sets
+        
+        self.linear = nn.Linear(in_features=input_shape[0], 
+                                out_features=self.target_embedding_shape[0]*self.target_embedding_shape[1])
+        self.scaled_tanh = ScaledTanh(scale=2.1)
+
+        self.blip_diffusion_model, _, _ = load_blip_models(mode='diffusion', is_eval=False)
+        # self.blip_diffusion_model.eval()
+        # for param in self.blip_diffusion_model.parameters():  
+            # param.requires_grad = False  
+    
+    def __concat_caption_embedding__(self, fixed_tensor : torch.Tensor, variable_tensor : torch.Tensor) -> torch.Tensor:
+        prefix = fixed_tensor[:2].unsqueeze(0).expand(variable_tensor.size(0), -1, -1)   
+        suffix = fixed_tensor[2:].unsqueeze(0).expand(variable_tensor.size(0), -1, -1)  
+        caption_embedding = torch.cat([prefix, variable_tensor, suffix], dim=1)
+        return caption_embedding
+    
+    def __concat_hidden_states__(self, image_tensor : torch.Tensor, caption_tensor : torch.Tensor) -> torch.Tensor:
+        hidden_states = torch.cat([caption_tensor[:,:2,:], image_tensor, caption_tensor[:,2:,:]], dim=1)
+        hidden_states += self.position_embeddings.unsqueeze(0).expand(hidden_states.shape[0], -1, -1)
+        return hidden_states
+    
+        
+    def forward(self, masked_fmri : torch.Tensor, prompt_embedding : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # predicted_embedding : image, prompt_embedding : caption variable
+        predicted_embedding = self.scaled_tanh(self.linear(masked_fmri))
+        image_embedding   = predicted_embedding.view(-1, *self.target_embedding_shape)
+        caption_embedding = self.__concat_caption_embedding__(fixed_tensor=self.caption_embedding_fixed, variable_tensor=prompt_embedding)
+        hidden_states = self.__concat_hidden_states__(image_tensor=image_embedding, caption_tensor=caption_embedding)
+        images = self.blip_diffusion_model.generate_image_array_via_embedding_trainable(
+                                uncond_embedding=self.uncond_embedding,
+                                hidden_states=hidden_states,
+                                causal_attention_mask=self.causal_attention_mask,
+                                seed=self.sets['iter_seed'],
+                                guidance_scale=self.sets['guidance_scale'],
+                                height=self.image_shape[0],
+                                width=self.image_shape[1],
+                                num_inference_steps=self.sets['num_inference_steps']//10,
+                            )
+        images = torch.tensor(np.array(images), device=device).view(masked_fmri.shape[0], *self.image_shape)
+        return images, image_embedding

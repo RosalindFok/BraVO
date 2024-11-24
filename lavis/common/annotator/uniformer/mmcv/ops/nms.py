@@ -123,8 +123,8 @@ def nms(boxes, scores, iou_threshold, offset=0, score_threshold=0, max_num=-1):
     will be used. The returned type will always be the same as inputs.
 
     Arguments:
-        boxes (torch.Tensor or np.ndarray): boxes in shape (N, 4).
-        scores (torch.Tensor or np.ndarray): scores in shape (N, ).
+        boxes (torch.Tensor or np.array): boxes in shape (N, 4).
+        scores (torch.Tensor or np.array): scores in shape (N, ).
         iou_threshold (float): IoU threshold for NMS.
         offset (int, 0 or 1): boxes' width or height is (x2 - x1 + offset).
         score_threshold (float): score threshold for NMS.
@@ -148,13 +148,13 @@ def nms(boxes, scores, iou_threshold, offset=0, score_threshold=0, max_num=-1):
         >>> dets, inds = nms(boxes, scores, iou_threshold)
         >>> assert len(inds) == len(dets) == 3
     """
-    assert isinstance(boxes, (torch.Tensor, np.ndarray))
-    assert isinstance(scores, (torch.Tensor, np.ndarray))
+    assert isinstance(boxes, (torch.Tensor, np.array))
+    assert isinstance(scores, (torch.Tensor, np.array))
     is_numpy = False
-    if isinstance(boxes, np.ndarray):
+    if isinstance(boxes, np.array):
         is_numpy = True
         boxes = torch.from_numpy(boxes)
-    if isinstance(scores, np.ndarray):
+    if isinstance(scores, np.array):
         scores = torch.from_numpy(scores)
     assert boxes.size(1) == 4
     assert boxes.size(0) == scores.size(0)
@@ -191,8 +191,8 @@ def soft_nms(boxes,
     The returned type will always be the same as inputs.
 
     Arguments:
-        boxes (torch.Tensor or np.ndarray): boxes in shape (N, 4).
-        scores (torch.Tensor or np.ndarray): scores in shape (N, ).
+        boxes (torch.Tensor or np.array): boxes in shape (N, 4).
+        scores (torch.Tensor or np.array): scores in shape (N, ).
         iou_threshold (float): IoU threshold for NMS.
         sigma (float): hyperparameter for gaussian method
         min_score (float): score filter threshold
@@ -216,13 +216,13 @@ def soft_nms(boxes,
         >>> assert len(inds) == len(dets) == 5
     """
 
-    assert isinstance(boxes, (torch.Tensor, np.ndarray))
-    assert isinstance(scores, (torch.Tensor, np.ndarray))
+    assert isinstance(boxes, (torch.Tensor, np.array))
+    assert isinstance(scores, (torch.Tensor, np.array))
     is_numpy = False
-    if isinstance(boxes, np.ndarray):
+    if isinstance(boxes, np.array):
         is_numpy = True
         boxes = torch.from_numpy(boxes)
-    if isinstance(scores, np.ndarray):
+    if isinstance(scores, np.array):
         scores = torch.from_numpy(scores)
     assert boxes.size(1) == 4
     assert boxes.size(0) == scores.size(0)
@@ -344,11 +344,11 @@ def nms_match(dets, iou_threshold):
     kept bbox. In each group, indice is sorted as score order.
 
     Arguments:
-        dets (torch.Tensor | np.ndarray): Det boxes with scores, shape (N, 5).
+        dets (torch.Tensor | np.array): Det boxes with scores, shape (N, 5).
         iou_thr (float): IoU thresh for NMS.
 
     Returns:
-        List[torch.Tensor | np.ndarray]: The outer list corresponds different
+        List[torch.Tensor | np.array]: The outer list corresponds different
             matched group, the inner Tensor corresponds the indices for a group
             in score order.
     """

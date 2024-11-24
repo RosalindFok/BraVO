@@ -186,7 +186,7 @@ class ULIPPCProcessor(BlipImageBaseProcessor):
 
 
     def __call__(self, pc_data_path):
-        if isinstance(pc_data_path, np.ndarray):
+        if isinstance(pc_data_path, np.array):
             pc_data = pc_data_path
         else:
             try:

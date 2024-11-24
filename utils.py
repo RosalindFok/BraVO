@@ -78,25 +78,32 @@ def get_items_in_list_via_substrs(items_list : list[str], *substrs : str) -> lis
     results_list = [string for string in items_list if all(substr in string for substr in substrs)]
     return results_list
 
-def merge_dicts_if_no_conflict(dict1 : dict[any, any], dict2 : dict[any, any]) -> dict[any, any] | None:
-    """
-    Check if there are key conflicts between two dictionaries.
-    If there are no key conflicts, return the merged dictionary;
-    if there are conflicts, return None.
+def merge_dicts_if_no_conflict(*dicts: dict) -> dict | None:  
+    """  
+    Check if there are key conflicts between multiple dictionaries.  
+    If there are no key conflicts, return the merged dictionary;  
+    if there are conflicts, return None.  
     
-    Args:
-        dict1: The first dictionary
-        dict2: The second dictionary
+    Args:  
+        *dicts: A variable number of dictionaries  
 
-    Returns:
-        The merged dictionary or None
-    """
-    # Check for key conflicts
-    if any(key in dict1 for key in dict2):
-        return None  # There are conflicts, return None
-    # No conflicts, merge the dictionaries
-    merged_dict = {**dict1, **dict2}
-    assert len(merged_dict) == len(dict1) + len(dict2), print(f'Error: Merged dictionary has different length than the sum of the original dictionaries.')
+    Returns:  
+        The merged dictionary or None  
+    """  
+    merged_dict = {}  
+    for d in dicts:  
+        # Check for key conflicts  
+        if any(key in merged_dict for key in d):  
+            return None  # There are conflicts, return None  
+        # No conflicts, merge the current dictionary  
+        merged_dict.update(d)  
+    
+    # Ensure the merged dictionary has the correct length  
+    total_length = sum(len(d) for d in dicts)  
+    assert len(merged_dict) == total_length, (  
+        f'Error: Merged dictionary has different length than the sum of the original dictionaries.'  
+    )  
+    
     return merged_dict
 
 def get_file_size(file_path : str) -> str:
@@ -143,7 +150,7 @@ class BLIP_Prior_Tools:
     all_embeddings_num = img_queries_num + txt_queries_num
 
     @staticmethod
-    def split_and_concat(array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def split_and_concat(array : np.array) -> tuple[np.array, np.array]:
         assert array.shape == (BLIP_Prior_Tools.all_embeddings_num, BLIP_Prior_Tools.embedding_length), f'{array.shape} != (77, 768)'
         array_1, array_2, arrayr_3 = np.split(array, [2, 18]) # BLIP decides, 77 = 2+16+59
         image_embedding = array_2
@@ -153,7 +160,7 @@ class BLIP_Prior_Tools:
         return image_embedding, text_embedding
 
     @staticmethod
-    def split_caption_embedding(array : np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def split_caption_embedding(array : np.array) -> tuple[np.array, np.array]:
         assert array.shape == (BLIP_Prior_Tools.txt_queries_num, BLIP_Prior_Tools.embedding_length), f'{array.shape} != (61, 768)'
         array_0 = array[0]
         array_1 = array[1]
@@ -165,7 +172,7 @@ class BLIP_Prior_Tools:
         return array_fixed, array_variable
     
     @staticmethod
-    def concatenate_caption_embedding(fixed_emb : np.ndarray, variable_emb : np.ndarray) -> np.ndarray:
+    def concatenate_caption_embedding(fixed_emb : np.array, variable_emb : np.array) -> np.array:
         assert fixed_emb.shape == (3, BLIP_Prior_Tools.embedding_length), f'fixed_emb={fixed_emb.shape} should be (3, 768)'
         assert variable_emb.shape == (58, BLIP_Prior_Tools.embedding_length), f'variable_emb={variable_emb.shape} should be (58, 768)'
         result = np.concatenate((fixed_emb[:-1], variable_emb, fixed_emb[-1].reshape(1, -1)), axis=0)
@@ -173,7 +180,7 @@ class BLIP_Prior_Tools:
         return result
     
     @staticmethod
-    def concatenate_embeddings(img_emb : np.ndarray, txt_emb : np.ndarray) -> np.ndarray:
+    def concatenate_embeddings(img_emb : np.array, txt_emb : np.array) -> np.array:
         assert img_emb.shape == (BLIP_Prior_Tools.img_queries_num, BLIP_Prior_Tools.embedding_length), f'img_emb={img_emb.shape} should be (16, 768)'
         assert txt_emb.shape == (BLIP_Prior_Tools.txt_queries_num, BLIP_Prior_Tools.embedding_length), f'txt_emb={txt_emb.shape} should be (61, 768)'
         result = np.concatenate((txt_emb[:2, :], img_emb, txt_emb[2:, :]), axis=0)

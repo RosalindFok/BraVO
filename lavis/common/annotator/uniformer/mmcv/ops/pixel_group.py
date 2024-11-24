@@ -29,23 +29,23 @@ def pixel_group(score, mask, embedding, kernel_label, kernel_contour,
             Each element consists of averaged confidence, pixel number, and
             coordinates (x_i, y_i for all pixels) in order.
     """
-    assert isinstance(score, (torch.Tensor, np.ndarray))
-    assert isinstance(mask, (torch.Tensor, np.ndarray))
-    assert isinstance(embedding, (torch.Tensor, np.ndarray))
-    assert isinstance(kernel_label, (torch.Tensor, np.ndarray))
-    assert isinstance(kernel_contour, (torch.Tensor, np.ndarray))
+    assert isinstance(score, (torch.Tensor, np.array))
+    assert isinstance(mask, (torch.Tensor, np.array))
+    assert isinstance(embedding, (torch.Tensor, np.array))
+    assert isinstance(kernel_label, (torch.Tensor, np.array))
+    assert isinstance(kernel_contour, (torch.Tensor, np.array))
     assert isinstance(kernel_region_num, int)
     assert isinstance(distance_threshold, float)
 
-    if isinstance(score, np.ndarray):
+    if isinstance(score, np.array):
         score = torch.from_numpy(score)
-    if isinstance(mask, np.ndarray):
+    if isinstance(mask, np.array):
         mask = torch.from_numpy(mask)
-    if isinstance(embedding, np.ndarray):
+    if isinstance(embedding, np.array):
         embedding = torch.from_numpy(embedding)
-    if isinstance(kernel_label, np.ndarray):
+    if isinstance(kernel_label, np.array):
         kernel_label = torch.from_numpy(kernel_label)
-    if isinstance(kernel_contour, np.ndarray):
+    if isinstance(kernel_contour, np.array):
         kernel_contour = torch.from_numpy(kernel_contour)
 
     if torch.__version__ == 'parrots':

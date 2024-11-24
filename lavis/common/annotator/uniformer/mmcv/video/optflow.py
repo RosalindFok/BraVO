@@ -22,7 +22,7 @@ def flowread(flow_or_path, quantize=False, concat_axis=0, *args, **kwargs):
     Returns:
         ndarray: Optical flow represented as a (h, w, 2) numpy array
     """
-    if isinstance(flow_or_path, np.ndarray):
+    if isinstance(flow_or_path, np.array):
         if (flow_or_path.ndim != 3) or (flow_or_path.shape[-1] != 2):
             raise ValueError(f'Invalid flow with shape {flow_or_path.shape}')
         return flow_or_path

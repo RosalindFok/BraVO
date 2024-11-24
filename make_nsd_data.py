@@ -113,7 +113,7 @@ class NSD_DATA():
         print(f'It took {end_time - start_time:.2f} seconds to read {self.stim_info_csv_file_path}.')
         return dict(zip(data_frame['nsdId'], data_frame['cocoId']))
 
-    def read_betas(self, session_id : int) -> tuple[str, np.ndarray]:
+    def read_betas(self, session_id : int) -> tuple[str, np.array]:
         start_time = time.time()
         # Info: https://cvnlab.slite.page/p/6CusMRYfk0/Functional-data-NSD#3e1740b1
         file_name = f'betas_session{str(session_id).zfill(2)}.nii.gz'
@@ -126,7 +126,7 @@ class NSD_DATA():
         print(f'It took {end_time - start_time:.2f} seconds to read {file_path}.')
         return data
         
-    def read_stimuli_hdf5(self) -> np.ndarray:
+    def read_stimuli_hdf5(self) -> np.array:
         start_time = time.time()
         with h5py.File(self.nsddata_stimuli_hdf5_file_path, 'r') as f:
             # imgBrick is 3 channels x 425 pixels x 425 pixels x 73,000 images and is in uint8 format. 
@@ -190,7 +190,7 @@ class NSD_DATA():
         print(f'It took {end_time - start_time:.2f} seconds to read {self.coco_annotation_dir_path}.')
         return captions_dict, categories_dict
     
-    def read_ROIs(self) -> None:
+    def read_ROIs(self) -> str:
         start_time = time.time()
         # saved path for ROIs
         saved_rois_path = join_paths(self.subject_saved_dir_path, 'ROIs')
@@ -296,8 +296,9 @@ class NSD_DATA():
 
         end_time = time.time()
         print(f'It took {end_time - start_time:.2f} seconds to get ROIs to {saved_rois_path}.')
+        return saved_rois_path
 
-    def make_pairs(self) -> dict[str : dict[int : dict[str : str]]]:
+    def make_pairs(self) -> tuple[dict[str : dict[int : dict[str : str]]], str]:
         """
         fMRI <--> image + text
         """        
@@ -305,7 +306,7 @@ class NSD_DATA():
         processed_data_paths_json_path = join_paths(self.subject_saved_dir_path, 'processed_data_paths.json')
         if os.path.exists(processed_data_paths_json_path):
             path_dict = read_json_file(path=processed_data_paths_json_path)
-            return path_dict
+            return path_dict, self.read_ROIs() # path_dict, saved_rois_path
 
         ## behav_responses_tsv
         responses = self.read_behav_responses_tsv()
@@ -332,7 +333,7 @@ class NSD_DATA():
         captions_dict, categories_dict = self.read_coco_annotation()
 
         ## ROIs
-        self.read_ROIs()
+        saved_rois_path = self.read_ROIs()
         
         ## Paths of train set and test set
         train_saved_dir_path = join_paths(self.subject_saved_dir_path, 'train')
@@ -431,9 +432,12 @@ class NSD_DATA():
         assert len(path_dict['train']) == len(os.listdir(train_saved_dir_path)), f"Number of train samples in json={len(path_dict['train'])} is not equal to the number of directory={len(os.listdir(train_saved_dir_path))}."
         assert len(path_dict['test']) == len(os.listdir(test_saved_dir_path)), f"Number of test samples in json={len(path_dict['test'])} is not equal to the number of directory={len(os.listdir(test_saved_dir_path))}."
         print(f'{self.subj} has {len(os.listdir(train_saved_dir_path))} pairs in train set, {len(os.listdir(test_saved_dir_path))} pairs in test set.')
-        return path_dict
+        return path_dict, saved_rois_path
 
-    def blip2_process(self, path_dict : dict[str : dict[str : dict[str : str]]]) -> None:
+    def blip2_process(self, path_dict : dict[str : dict[str : dict[str : str]]], saved_rois_path : str) -> None:
+        '''
+        run_files: connect step1 and step2
+        '''
         # Convert the keys of path_dict from str to int
         path_dict = {key: {int(k) : v for k, v in value.items()} for key, value in path_dict.items()}  
         num_train, num_test = len(path_dict['train']), len(path_dict['test'])
@@ -474,7 +478,8 @@ class NSD_DATA():
                 for batches in tqdm(dataloader, desc=f'Generate captions for {tag} set', leave=True):
                     indices = batches.index.to('cpu').numpy()
                     images = batches.image.to(device) # torch.Size([batch_size, 425, 425, 3])
-                    output_text = blip2t5_model.generate({'image' : images, 'prompt' : prompt},
+                    # output_text = blip2t5_model.generate({'image' : images, 'prompt' : prompt},
+                    output_text = blip2t5_model.generate({'image' : images},
                                                           max_length=100, min_length=20)
                     for index, text in zip(indices, output_text):
                         index = int(index)
@@ -508,7 +513,14 @@ class NSD_DATA():
         all_strings_train_path = join_paths(self.subject_saved_dir_path, 'all_strings_path_in_train.json')
         all_strings_test_path  = join_paths(self.subject_saved_dir_path, 'all_strings_path_in_test.json')
         null_sample_hidden_states_path = join_paths(self.blips_output_dir_path, 'null_sample_hidden_states.npy')
-        run_files_dict = {
+        
+        fixed_paths = {
+            'uncond_embedding_path' : uncond_embedding_path,
+            'position_embeddings_path' : position_embeddings_path,
+            'causal_attention_mask_path' : causal_attention_mask_path,
+            'null_sample_hidden_states_path' : null_sample_hidden_states_path,
+        }
+        new_paths  = {
             self.functional_space : {
                 'train' : {
                     'hdf5' : blipdiffusion_generated_embeddings_of_train_set_path,
@@ -517,13 +529,12 @@ class NSD_DATA():
                 'test'  : {
                     'hdf5' : blipdiffusion_generated_embeddings_of_test_set_path,
                     'json' : all_strings_test_path
-                }
+                },
+                'rois_dir_path' : saved_rois_path,
             },
-            'uncond_embedding_path' : uncond_embedding_path,
-            'position_embeddings_path' : position_embeddings_path,
-            'causal_attention_mask_path' : causal_attention_mask_path,
-            'null_sample_hidden_states_path' : null_sample_hidden_states_path
         }
+        run_files_dict = read_json_file(run_files_path) if os.path.exists(run_files_path) else fixed_paths 
+        run_files_dict.update(new_paths)
         write_json_file(path=run_files_path, data=run_files_dict)
 
         if not (need_embedding_train and need_embedding_test):
@@ -641,12 +652,16 @@ class NSD_DATA():
         # load blip diffusion model
         blip_diffusion_model, _, _ = load_blip_models(mode = 'diffusion')
 
-        # split null embedding and save the caption_embedding_fixed
-        null_img_embedding, null_cap_embedding = BLIP_Prior_Tools.split_and_concat(null_sample_hidden_states)
+        # split null embedding and save the caption_embedding_fixed, 
+        # remember to minus position_embedding when saving
+        _, null_cap_embedding = BLIP_Prior_Tools.split_and_concat(null_sample_hidden_states-position_embeddings.squeeze(0))
         caption_embedding_fixed, _ = BLIP_Prior_Tools.split_caption_embedding(null_cap_embedding)
         caption_embedding_fixed_path = join_paths(self.blips_output_dir_path, 'caption_embedding_fixed.npy')
         run_files['caption_embedding_fixed_path'] = caption_embedding_fixed_path
         np.save(file=caption_embedding_fixed_path, arr=caption_embedding_fixed)
+        # no need to minus position_embedding when generating
+        null_img_embedding, null_cap_embedding = BLIP_Prior_Tools.split_and_concat(null_sample_hidden_states)
+
 
         # generate image via null_img+null_cap
         nullI_nullC_image_path = join_paths(self.blips_output_dir_path, 'nullI+nullC.png')
@@ -666,11 +681,11 @@ class NSD_DATA():
         run_files['nullI_nullC_image_path'] = nullI_nullC_image_path
 
         # generate images for all samples
-        for tag in ['test', 'train']:
-            tag_dir_path = join_paths(self.blips_output_dir_path, tag)
+        for set_name in ['test', 'train']:
+            tag_dir_path = join_paths(self.blips_output_dir_path, set_name)
             check_and_make_dirs(tag_dir_path)
-            run_files[self.functional_space][tag]['dirs'] = tag_dir_path
-            hdf5_path = run_files[self.functional_space][tag]['hdf5']
+            run_files[self.functional_space][set_name]['dirs'] = tag_dir_path
+            hdf5_path = run_files[self.functional_space][set_name]['hdf5']
 
             # check all done file, if exists, skip
             all_done_path = join_paths(tag_dir_path, 'all_done')
@@ -678,11 +693,11 @@ class NSD_DATA():
                 continue
 
             with h5py.File(hdf5_path, 'r') as hdf5_file:
-                for index in hdf5_file:
-                    print(f"Processing sample {index} / {len(hdf5_file.keys())} ...")
+                for cnt, index in enumerate(hdf5_file):
+                    print(f"Processing sample {cnt+1} / {len(hdf5_file.keys())} in {set_name} set")
                     sample_dir_path = join_paths(tag_dir_path, str(index))
                     check_and_make_dirs(sample_dir_path)
-                    
+
                     # check done file, if exists, skip
                     done_path = join_paths(sample_dir_path, 'done')
                     if os.path.exists(done_path):
@@ -699,12 +714,17 @@ class NSD_DATA():
                         dir_path = join_paths(sample_dir_path, f'{tag}')
                         check_and_make_dirs(dir_path)
                         # blip embedding
-                        blip_img_embedding, blip_cap_embedding = BLIP_Prior_Tools.split_and_concat(hdf5_file[index][f'hidden_states_with_{tag}'][:])
+                        blip_hidden_states = hdf5_file[index][f'hidden_states_with_{tag}'][:]
+                        blip_hidden_states_minus_position_embedding = blip_hidden_states - position_embeddings.squeeze(0)
+                        # Save: blip_hidden_states_minus_position_embedding
+                        blip_img_embedding, blip_cap_embedding = BLIP_Prior_Tools.split_and_concat(blip_hidden_states_minus_position_embedding)
                         caption_embedding_fixed, blip_cap_embedding_variable = BLIP_Prior_Tools.split_caption_embedding(blip_cap_embedding)
                         assert np.allclose(caption_embedding_fixed, np.load(caption_embedding_fixed_path, allow_pickle=True), rtol=1e-5, atol=1e-8), f"caption_embedding_fixed in {tag}-{index} does not match with the one in {caption_embedding_fixed_path}"
                         np.save(file=join_paths(dir_path, 'image_embedding.npy'), arr=blip_img_embedding)
                         np.save(file=join_paths(dir_path, 'caption_embedding_variable.npy'), arr=blip_cap_embedding_variable)
-                        samples = { # str : np.ndarray
+                        # Generate: blip_hidden_states
+                        blip_img_embedding, blip_cap_embedding = BLIP_Prior_Tools.split_and_concat(blip_hidden_states)
+                        samples = { # str : np.array
                             'nullI+blipC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=blip_cap_embedding),
                             'blipI+nullC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img_embedding, txt_emb=null_cap_embedding),
                             'blipI+blipC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img_embedding, txt_emb=blip_cap_embedding),
@@ -724,7 +744,7 @@ class NSD_DATA():
                                                         num_inference_steps=configs_dict['blip_diffusion']['num_inference_steps']//10,
                                 )
                                 generated_image.convert('RGB').save(image_path)
-                    
+
                     # write done file
                     with open(done_path, 'w') as f:
                         f.write('done')
@@ -733,12 +753,12 @@ class NSD_DATA():
             with open(all_done_path, 'w') as f:
                 f.write('done')
 
-        # Updata run_files and save it
+        # Update run_files and save it
         write_json_file(path=run_files_path, data=run_files)
 
 # make pairs of NSD
 if __name__ == '__main__':
     nsd_data = NSD_DATA(subj_id=configs_dict['subj_id'])
-    path_dict = nsd_data.make_pairs()
-    nsd_data.blip2_process(path_dict=path_dict)
+    path_dict, saved_rois_path = nsd_data.make_pairs()
+    nsd_data.blip2_process(path_dict=path_dict, saved_rois_path=saved_rois_path)
     nsd_data.blipdiffusion_process()

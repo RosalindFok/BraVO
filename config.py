@@ -16,9 +16,9 @@ configs_dict = {
     },
 
     'train_decoder' : {
-        'batch_size' : 256, 
-        'learning_rate' : 1e-4, # 2e-5,
-        'epochs' : 100,
+        'batch_size' : 1, 
+        'learning_rate' : 2e-5,
+        'epochs' : 10,
     },
 
     'blip_diffusion' :{

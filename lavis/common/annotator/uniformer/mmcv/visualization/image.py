@@ -55,7 +55,7 @@ def imshow_bboxes(img,
     img = imread(img)
     img = np.ascontiguousarray(img)
 
-    if isinstance(bboxes, np.ndarray):
+    if isinstance(bboxes, np.array):
         bboxes = [bboxes]
     if not isinstance(colors, list):
         colors = [colors for _ in range(len(bboxes))]

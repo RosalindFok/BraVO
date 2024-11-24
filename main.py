@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 
 from losses import Decoder_loss
 from config import configs_dict
-from dataset import fetch_nsd_rois_and_labels, NSD_Dataset, make_nsd_dataset, generate_null_blip_images_via_embedding
+from dataset import fetch_nsd_rois_and_labels, NSD_Dataset, make_nsd_dataset #, generate_null_blip_images_via_embedding
 from models import device, devices_num, num_workers, get_GPU_memory_usage, load_blip_models, BraVO_Decoder
 from utils import join_paths, check_and_make_dirs, write_json_file, read_json_file, merge_dicts_if_no_conflict, BLIP_Prior_Tools
 from utils import train_results_dir_path, test_results_dir_path, nsd_subject_saved_dir_path, fmrishape_subject_saved_dir_path
@@ -32,15 +32,34 @@ def train(
     torch.cuda.empty_cache()
     train_loss = []
     mem_reserved_list = []
-    for batches in tqdm(dataloader, desc='Training', leave=True):
-        input_tensor = batches.input_tensor.to(device)
-        target_embedding = batches.target_embedding.to(device)
-        # Forward
-        pred_embedding  = model(input_tensor)
-        # Compute loss
-        loss = loss_fn(input=pred_embedding, target=target_embedding)
-        assert not torch.isnan(loss), 'loss is nan, stop training!'
+    # for batches in tqdm(dataloader, desc='Training', leave=True):
+    #     input_tensor = batches.input_tensor.to(device)
+    #     target_embedding = batches.target_embedding.to(device)
+    #     # Forward
+    #     pred_embedding  = model(input_tensor)
+    #     target_embedding = torch.nn.Sigmoid()(target_embedding)
+    #     # Compute loss
+    #     loss = loss_fn(input=pred_embedding, target=target_embedding)
+    #     assert not torch.isnan(loss), 'loss is nan, stop training!'
+    #     train_loss.append(loss.item())
+    #     # 3 steps of back propagation
+    #     optimizer.zero_grad()
+    #     loss.backward() 
+    #     optimizer.step()
+    #     # Monitor GPU memory usage
+    #     total_memory, mem_reserved = get_GPU_memory_usage()
+    #     mem_reserved_list.append(mem_reserved)
+    for batches in dataloader:
+        coco_image = batches.coco_image.to(device)
+        masked_fmri = batches.masked_fmri.to(device)
+        image_embedding = batches.image_embedding.to(device)
+        caption_embedding_variable = batches.caption_embedding_variable.to(device)
+        # forward
+        images, _ = model(masked_fmri=masked_fmri, prompt_embedding=caption_embedding_variable)
+        # compute loss
+        loss = torch.nn.MSELoss()(images, coco_image)
         train_loss.append(loss.item())
+        assert not torch.isnan(loss), 'loss is nan, stop training!'
         # 3 steps of back propagation
         optimizer.zero_grad()
         loss.backward() 
@@ -48,6 +67,9 @@ def train(
         # Monitor GPU memory usage
         total_memory, mem_reserved = get_GPU_memory_usage()
         mem_reserved_list.append(mem_reserved)
+        print(mem_reserved)
+        exit()
+
     return model, sum(train_loss)/len(train_loss), total_memory, max(mem_reserved_list)
 
 def test(
@@ -59,7 +81,7 @@ def test(
 ) -> tuple[float, float]:
     """
     """
-    def __concat_caption_embedding__(array_fixed : np.ndarray, array_variable : np.ndarray) -> np.ndarray:
+    def __concat_caption_embedding__(array_fixed : np.array, array_variable : np.array) -> np.array:
         assert array_fixed.shape == (3, 768)
         assert array_variable.shape == (58, 768)
         array = np.concatenate((array_fixed[:-1], array_variable, array_fixed[-1].reshape(1, -1)), axis=0)
@@ -85,11 +107,10 @@ def test(
         for batches in tqdm(dataloader, desc=desc, leave=True):
             index = batches.index.cpu().numpy()
             pred_embedding  = model(batches.input_tensor.to(device)).cpu().numpy()
+            pred_embedding = np.log(pred_embedding / (1-pred_embedding))
             coco_image = batches.coco_image.numpy()
             target_embedding = batches.target_embedding.numpy()
             strings_json_paths = batches.strings_json_path
-            if tower_name == 'c':
-                blip_caption_embedding_fixed = batches.blip_caption_embedding_fixed.numpy()
 
             # Compute embedding similarity
             for idx, pe, te in zip(index, pred_embedding, target_embedding):
@@ -161,6 +182,8 @@ def main() -> None:
     subj_id = configs_dict['subj_id']
     # dataset name
     dataset_name = configs_dict['dataset_name']
+    # functional_space = {func1mm, func1pt8mm}
+    functional_space = configs_dict['functional_space']
     # train brain decoder
     batch_size = configs_dict['train_decoder']['batch_size']
     learning_rate = configs_dict['train_decoder']['learning_rate']
@@ -188,22 +211,16 @@ def main() -> None:
     ## Data
     rois_setup = namedtuple('rois_setup', ['derived_type', 'roi_name', 'thresholds'])
     rois_setup = rois_setup(derived_type, roi_name, thresholds)
-    mask_data, thresholds, labels_string = fetch_nsd_rois_and_labels(subj_path=sujb_path, rois_setup=rois_setup)
-    arrays_point = make_nsd_dataset(subj_path=sujb_path, mask_data=mask_data, thresholds=thresholds, labels_string=labels_string)
+    mask_data, thresholds, labels_string = fetch_nsd_rois_and_labels(functional_space=functional_space, rois_setup=rois_setup)
+    arrays_point = make_nsd_dataset(subj_path=sujb_path, functional_space=functional_space, mask_data=mask_data, thresholds=thresholds, labels_string=labels_string)
+    
     uncond_embedding = arrays_point.uncond_embedding
     position_embeddings = arrays_point.position_embeddings
     causal_attention_mask = arrays_point.causal_attention_mask
     null_sample_hidden_states = arrays_point.null_sample_hidden_states
+    caption_embedding_fixed = arrays_point.caption_embedding_fixed
     null_img_embedding, null_cap_embedding = BLIP_Prior_Tools.split_and_concat(null_sample_hidden_states.squeeze())
-    null_img_embedding = null_img_embedding
-    null_cap_embedding = null_cap_embedding
     regions_saved_dir_path = arrays_point.regions_saved_dir_path
-    # generate_null_blip_images_via_embedding(regions_saved_dir_path=regions_saved_dir_path,
-    #                                         uncond_embedding=uncond_embedding,
-    #                                         position_embeddings=position_embeddings,
-    #                                         causal_attention_mask=causal_attention_mask,
-    #                                         null_img_embedding=null_img_embedding,
-    #                                         null_cap_embedding=null_cap_embedding)
 
     ## Path to save
     # the path of training results
@@ -219,20 +236,21 @@ def main() -> None:
     
     # Train-Valid and Test
     if task == 't':
+        caption_type = 'coco'
         # dataloader
         train_dataloader = DataLoader(dataset=NSD_Dataset(
                                                 root_dir=join_paths(regions_saved_dir_path, 'train'),
-                                                tower_name=tower_name
+                                                caption_type=caption_type
                                             ), 
                                       batch_size=batch_size, shuffle=False, num_workers=num_workers)
         test_dataloader  = DataLoader(dataset=NSD_Dataset(
                                                 root_dir=join_paths(regions_saved_dir_path, 'test'),
-                                                tower_name=tower_name
+                                                caption_type=caption_type
                                             ),  
                                       batch_size=batch_size, shuffle=False, num_workers=num_workers)
         
         # Loss function
-        decoder_loss = Decoder_loss(w1=1, w2=1, w3=0)
+        decoder_loss = Decoder_loss(w1=0, w2=1, w3=0)
         # if tower_name in ['image', 'i']:
         #     decoder_loss = torch.nn.CrossEntropyLoss()
         # elif tower_name in ['text', 't', 'caption', 'c']:
@@ -240,14 +258,26 @@ def main() -> None:
 
         # Network
         light_loader = next(iter(test_dataloader))
-        
-        input_shape = light_loader.input_tensor.shape[1:]
-        output_shape = light_loader.target_embedding.shape[1:] 
-        decoder_model = BraVO_Decoder(input_shape=input_shape, output_shape=output_shape, tower_name=tower_name)
-        print(f'Input Shape  = {input_shape}')
-        print(f'Output Shape = {output_shape}')
+        coco_image_shape = light_loader.coco_image.shape[1:]
+        masked_fmri_shape = light_loader.masked_fmri.shape[1:]
+        image_embedding_shape = light_loader.image_embedding.shape[1:] 
+        caption_embedding_variable_shape = light_loader.caption_embedding_variable.shape[1:] 
+        decoder_model = BraVO_Decoder(
+            input_shape=masked_fmri_shape,
+            target_embedding_shape=image_embedding_shape,
+            target_image_shape=coco_image_shape,
+            uncond_embedding=torch.tensor(uncond_embedding, device=device),
+            position_embeddings=torch.tensor(position_embeddings, device=device),
+            causal_attention_mask=torch.tensor(causal_attention_mask, device=device),
+            caption_embedding_fixed=torch.tensor(caption_embedding_fixed, device=device),
+            sets=configs_dict['blip_diffusion']
+        )
+        print(f'coco_image Shape  = {coco_image_shape}')
+        print(f'masked_fmri Shape  = {masked_fmri_shape}')
+        print(f'image_embedding Shape = {image_embedding_shape}')
+        print(f'caption_embedding_variable Shape = {caption_embedding_variable_shape}')
         trainable_parameters = sum(p.numel() for p in decoder_model.parameters() if p.requires_grad)
-        print(decoder_model)
+        # print(decoder_model)
         # decoder_model = torch.nn.DataParallel(decoder_model)
         print(f'The number of trainable parametes of {decoder_model.__class__.__name__} is {trainable_parameters}.')
         decoder_model = decoder_model.to(device=device)
@@ -331,7 +361,7 @@ def main() -> None:
                 current_x += img.width + separator_width  
             new_img.save(join_paths(saved_dir_path, f'{name}.png'))
     
-        blip_diffusion_model, _, _ = load_blip_models(mode = 'diffusion')
+        blip_diffusion_model, _, _ = load_blip_models(mode='diffusion')
         blip2t5_model, blip2t5_vis_processors, _ = load_blip_models(mode='caption') 
         blip2itm_model, blip2itm_vis_processors, blip2itm_text_processors = load_blip_models(mode='matching')
     

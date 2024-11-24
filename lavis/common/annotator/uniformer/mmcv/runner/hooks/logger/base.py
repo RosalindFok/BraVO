@@ -41,7 +41,7 @@ class LoggerHook(Hook):
 
         Args:
             val: Input variable.
-            include_np (bool): Whether include 0-d np.ndarray as a scalar.
+            include_np (bool): Whether include 0-d np.array as a scalar.
             include_torch (bool): Whether include 0-d torch.Tensor as a scalar.
 
         Returns:
@@ -49,7 +49,7 @@ class LoggerHook(Hook):
         """
         if isinstance(val, numbers.Number):
             return True
-        elif include_np and isinstance(val, np.ndarray) and val.ndim == 0:
+        elif include_np and isinstance(val, np.array) and val.ndim == 0:
             return True
         elif include_torch and isinstance(val, torch.Tensor) and len(val) == 1:
             return True

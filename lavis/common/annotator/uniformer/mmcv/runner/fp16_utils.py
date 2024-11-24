@@ -38,7 +38,7 @@ def cast_tensor_type(inputs, src_type, dst_type):
         return inputs.to(dst_type)
     elif isinstance(inputs, str):
         return inputs
-    elif isinstance(inputs, np.ndarray):
+    elif isinstance(inputs, np.array):
         return inputs
     elif isinstance(inputs, abc.Mapping):
         return type(inputs)({

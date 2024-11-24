@@ -23,7 +23,7 @@ def tensor2imgs(tensor, mean=(0, 0, 0), std=(1, 1, 1), to_rgb=True):
             Defaults to True.
 
     Returns:
-        list[np.ndarray]: A list that contains multiple images.
+        list[np.array]: A list that contains multiple images.
     """
 
     if torch is None:

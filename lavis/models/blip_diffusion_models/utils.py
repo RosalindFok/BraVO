@@ -29,7 +29,7 @@ def numpy_to_pil(images):
 
 
 def preprocess_canny(
-    input_image: np.ndarray,
+    input_image: np.array,
     image_resolution: int,
     low_threshold: int,
     high_threshold: int,

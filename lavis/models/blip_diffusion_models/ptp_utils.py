@@ -27,7 +27,7 @@ from typing import Union, Tuple, List, Dict, Optional
 import torch.nn.functional as nnf
 
 
-def text_under_image(image: np.ndarray, text: str, text_color: Tuple[int, int, int] = (0, 0, 0)) -> np.ndarray:
+def text_under_image(image: np.array, text: str, text_color: Tuple[int, int, int] = (0, 0, 0)) -> np.array:
     h, w, c = image.shape
     offset = int(h * .2)
     img = np.ones((h + offset, w, c), dtype=np.uint8) * 255
@@ -39,7 +39,7 @@ def text_under_image(image: np.ndarray, text: str, text_color: Tuple[int, int, i
     return img
 
 
-def view_images(images: Union[np.ndarray, List],
+def view_images(images: Union[np.array, List],
                 num_rows: int = 1,
                 offset_ratio: float = 0.02,
                 display_image: bool = True) -> Image.Image:

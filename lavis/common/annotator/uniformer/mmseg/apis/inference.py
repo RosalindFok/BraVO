@@ -110,7 +110,7 @@ def show_result_pyplot(model,
 
     Args:
         model (nn.Module): The loaded segmentor.
-        img (str or np.ndarray): Image filename or loaded image.
+        img (str or np.array): Image filename or loaded image.
         result (list): The segmentation result.
         palette (list[list[int]]] | None): The palette of segmentation
             map. If None is given, random palette will be generated.

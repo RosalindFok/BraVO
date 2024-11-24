@@ -62,7 +62,7 @@ class CustomDataset(Dataset):
             Default: False
         classes (str | Sequence[str], optional): Specify classes to load.
             If is None, ``cls.CLASSES`` will be used. Default: None.
-        palette (Sequence[Sequence[int]]] | np.ndarray | None):
+        palette (Sequence[Sequence[int]]] | np.array | None):
             The palette of segmentation map. If None is given, and
             self.PALETTE is None, random palette will be generated.
             Default: None
@@ -249,7 +249,7 @@ class CustomDataset(Dataset):
                 string, take it as a file name. The file contains the name of
                 classes where each line contains one class name. If classes is
                 a tuple or list, override the CLASSES defined by the dataset.
-            palette (Sequence[Sequence[int]]] | np.ndarray | None):
+            palette (Sequence[Sequence[int]]] | np.array | None):
                 The palette of segmentation map. If None is given, random
                 palette will be generated. Default: None
         """

@@ -306,7 +306,7 @@ def adjust_sharpness(img, factor=1., kernel=None):
     Args:
         img (ndarray): Image to be sharpened. BGR order.
         factor (float): Same as :func:`mmcv.adjust_brightness`.
-        kernel (np.ndarray, optional): Filter kernel to be applied on the img
+        kernel (np.array, optional): Filter kernel to be applied on the img
             to obtain the degenerated img. Defaults to None.
 
     Note:
@@ -322,8 +322,8 @@ def adjust_sharpness(img, factor=1., kernel=None):
     if kernel is None:
         # adopted from PIL.ImageFilter.SMOOTH
         kernel = np.array([[1., 1., 1.], [1., 5., 1.], [1., 1., 1.]]) / 13
-    assert isinstance(kernel, np.ndarray), \
-        f'kernel must be of type np.ndarray, but got {type(kernel)} instead.'
+    assert isinstance(kernel, np.array), \
+        f'kernel must be of type np.array, but got {type(kernel)} instead.'
     assert kernel.ndim == 2, \
         f'kernel must have a dimension of 2, but got {kernel.ndim} instead.'
 
@@ -355,8 +355,8 @@ def adjust_lighting(img, eigval, eigvec, alphastd=0.1, to_rgb=True):
     Returns:
         ndarray: The adjusted image.
     """
-    assert isinstance(eigval, np.ndarray) and isinstance(eigvec, np.ndarray), \
-        f'eigval and eigvec should both be of type np.ndarray, got ' \
+    assert isinstance(eigval, np.array) and isinstance(eigvec, np.array), \
+        f'eigval and eigvec should both be of type np.array, got ' \
         f'{type(eigval)} and {type(eigvec)} instead.'
 
     assert eigval.ndim == 1 and eigvec.ndim == 2
@@ -394,9 +394,9 @@ def lut_transform(img, lut_table):
     Returns:
         ndarray: The transformed image.
     """
-    assert isinstance(img, np.ndarray)
+    assert isinstance(img, np.array)
     assert 0 <= np.min(img) and np.max(img) <= 255
-    assert isinstance(lut_table, np.ndarray)
+    assert isinstance(lut_table, np.array)
     assert lut_table.shape == (256, )
 
     return cv2.LUT(np.array(img, dtype=np.uint8), lut_table)
@@ -418,7 +418,7 @@ def clahe(img, clip_limit=40.0, tile_grid_size=(8, 8)):
     Returns:
         ndarray: The processed image.
     """
-    assert isinstance(img, np.ndarray)
+    assert isinstance(img, np.array)
     assert img.ndim == 2
     assert isinstance(clip_limit, (float, int))
     assert is_tuple_of(tile_grid_size, int)

@@ -21,7 +21,7 @@ def to_tensor(data):
 
     if isinstance(data, torch.Tensor):
         return data
-    elif isinstance(data, np.ndarray):
+    elif isinstance(data, np.array):
         return torch.from_numpy(data)
     elif isinstance(data, Sequence) and not mmcv.is_str(data):
         return torch.tensor(data)

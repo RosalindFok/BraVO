@@ -606,7 +606,12 @@ class BlipDiffusion(BaseModel):
         )
 
         # image+cond_category -> image_embeddings
-        image_embeddings = self.forward_ctx_embeddings(cond_image, cond_subject) # tensor, (bs, 16, 768)
+        # simplify the self._forward_prompt_embeddings
+        image_embeddings =   self.blip.extract_features( # blip2_models.blip2_qformer.Blip2Qformer.extract_features
+                {"image": cond_image, "text_input": cond_subject}, mode="multimodal"
+            ).multimodal_embeds # tensor, (bs, 16, 768)
+        image_embeddings = self.proj_layer(image_embeddings) # tensor, (bs, 16, 768)
+        
         # prompt+tgt_category -> text_ids, which is list[int]
         tokenized_prompt = self._tokenize_text(prompt).to(self.device) # transformers.tokenization_utils_base.BatchEncoding, including 'input_ids' and 'attention_mask'
         text_ids = tokenized_prompt.input_ids
@@ -654,7 +659,7 @@ class BlipDiffusion(BaseModel):
 
         embeddings = torch.cat([uncond_embedding, text_embeddings])
 
-        for i, t in enumerate(iterator):
+        for i, t in enumerate(iterator): # iterator = num_inference_steps
             latents = self._denoise_latent_step(
                 latents=latents,
                 t=t,
@@ -665,10 +670,10 @@ class BlipDiffusion(BaseModel):
                 guidance_scale=guidance_scale,
                 use_inversion=use_ddim,
             )
-
         image = self._latent_to_image(latents)[0]
-        
+        image = image.resize((height, width))
         return image
+    
     ### BraVO
 
     def _register_attention_refine(
@@ -862,7 +867,7 @@ class BlipDiffusion(BaseModel):
         image = numpy_to_pil(image)
 
         return image
-
+    
     def _noise_latent_step(
         self,
         latents,
@@ -993,10 +998,10 @@ class BlipDiffusion(BaseModel):
     def forward_ctx_embeddings(self, input_image, text_input, ratio=None):
         def compute_ctx_embeddings(input_image, text_input):
             # blip_embeddings = self.blip(image=input_image, text=text_input)
-            blip_embeddings = self.blip.extract_features( # blip2_models.blip2_qformer.Blip2Qformer.extract_features
+            blip_embeddings = self.blip.extract_features( 
                 {"image": input_image, "text_input": text_input}, mode="multimodal"
-            ).multimodal_embeds # blip_embeddings.shape = ([1, 16, 768])
-            ctx_embeddings = self.proj_layer(blip_embeddings) # ctx_embeddings.shape = ([1, 16, 768])
+            ).multimodal_embeds 
+            ctx_embeddings = self.proj_layer(blip_embeddings) 
             return ctx_embeddings
 
         if isinstance(text_input, str):
@@ -1014,18 +1019,17 @@ class BlipDiffusion(BaseModel):
             for inp_image, inp_text in zip(input_image, text_input):
                 ctx_embeddings = compute_ctx_embeddings(inp_image, inp_text)
                 all_ctx_embeddings.append(ctx_embeddings)
-
+                
             if ratio is not None:
                 assert len(ratio) == len(all_ctx_embeddings)
                 assert sum(ratio) == 1
             else:
-                ratio = [1 / len(all_ctx_embeddings)] * len(all_ctx_embeddings)
-
+                ratio = [1 / len(all_ctx_embeddings)] * len(all_ctx_embeddings) # BraVO: ratio =[1.0] 
             ctx_embeddings = torch.zeros_like(all_ctx_embeddings[0])
 
             for ratio, ctx_embeddings_ in zip(ratio, all_ctx_embeddings):
                 ctx_embeddings += ratio * ctx_embeddings_
-
+        
         return ctx_embeddings
 
     @classmethod

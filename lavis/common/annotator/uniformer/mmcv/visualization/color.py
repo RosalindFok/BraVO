@@ -42,7 +42,7 @@ def color_val(color):
     elif isinstance(color, int):
         assert 0 <= color <= 255
         return color, color, color
-    elif isinstance(color, np.ndarray):
+    elif isinstance(color, np.array):
         assert color.ndim == 1 and color.size == 3
         assert np.all((color >= 0) & (color <= 255))
         color = color.astype(np.uint8)

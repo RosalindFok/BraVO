@@ -23,14 +23,14 @@ def contour_expand(kernel_mask, internal_kernel_label, min_kernel_area,
     Returns:
         label (list): The instance index map with size hxw.
     """
-    assert isinstance(kernel_mask, (torch.Tensor, np.ndarray))
-    assert isinstance(internal_kernel_label, (torch.Tensor, np.ndarray))
+    assert isinstance(kernel_mask, (torch.Tensor, np.array))
+    assert isinstance(internal_kernel_label, (torch.Tensor, np.array))
     assert isinstance(min_kernel_area, int)
     assert isinstance(kernel_num, int)
 
-    if isinstance(kernel_mask, np.ndarray):
+    if isinstance(kernel_mask, np.array):
         kernel_mask = torch.from_numpy(kernel_mask)
-    if isinstance(internal_kernel_label, np.ndarray):
+    if isinstance(internal_kernel_label, np.array):
         internal_kernel_label = torch.from_numpy(internal_kernel_label)
 
     if torch.__version__ == 'parrots':
