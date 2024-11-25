@@ -28,7 +28,7 @@ configs_dict = {
         'num_inference_steps' : 500, 
     },
 
-    'blip_caption' : {
-        'prompt' : 'Please provide a detailed description of this image, including all visible elements such as objects, people, settings, actions, colors, and emotions, and please do not generate repetitive statements.'
-    }
+    # 'blip_caption' : {
+    #     'prompt' : 'Please provide a detailed description of this image, including all visible elements such as objects, people, settings, actions, colors, and emotions, and please do not generate repetitive statements.'
+    # }
 }
