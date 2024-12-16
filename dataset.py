@@ -1,17 +1,13 @@
 import os
-import gc
-import h5py
 import copy
 import torch
-import shutil
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
 from collections import namedtuple 
 from torch.utils.data import Dataset
 
-from models import device, load_blip_models
-from utils import run_files_path, join_paths, read_nii_file, check_and_make_dirs, read_json_file, BLIP_Prior_Tools, get_items_in_list_via_substrs
+from utils import run_files_path, nsd_subject_saved_dir_path, join_paths, read_nii_file, read_json_file, get_items_in_list_via_substrs
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false' 
 
@@ -19,15 +15,38 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 ###### NSD Dataset #####
 ######################## 
 
-def fetch_nsd_rois_and_labels(functional_space : str, rois_setup : namedtuple) -> tuple[np.array, str]:
+def fetch_nsd_rois_and_labels(functional_space : str, rois_setup : tuple) -> tuple[np.array, list[int], str]:
     """  
-    """
+    Fetches the fMRI mask, thresholds, and labels for a specific ROI (Region of Interest) setup in the NSD (Natural Scenes Dataset).  
+
+    This function retrieves the fMRI mask and associated metadata (thresholds and labels) for a given functional space  
+    and ROI setup. It validates the input parameters, locates the required files, and processes the data to return  
+    a structured representation of the ROI information.  
+
+    Args:  
+        functional_space (str): The resolution of the fMRI data. Must be one of:  
+            ['1', '1.8', 'func1mm', 'func1pt8mm'].  
+        rois_setup (tuple): A named tuple containing:  
+            - derived_type (str): The type of ROI data (e.g., 'surface' or 'volume').  
+            - roi_name (str): The name of the ROI to fetch.  
+            - thresholds (list[int]): A list of integer threshold values for filtering the ROI data.  
+
+    Returns:  
+        tuple: A named tuple containing:  
+            - fmri_mask (np.array): A 3D numpy array representing the fMRI mask for the specified ROI.  
+            - thresholds (list[int]): A list of integer threshold values used for filtering the ROI data.  
+            - labels_string (str): A string representation of the labels associated with the thresholds.  
+
+    Raises:  
+        AssertionError: If any of the input parameters are invalid or required files are missing.  
+        ValueError: If the derived type or ROI name is not found in the available data.  
+    """ 
     derived_type = rois_setup.derived_type
     roi_name = rois_setup.roi_name
     thresholds = rois_setup.thresholds
 
     assert os.path.exists(run_files_path), f'run_files_path={run_files_path} does not exist, please run step1_run.sh first.'
-    rois_path = read_json_file(run_files_path)[functional_space]['rois_dir_path']
+    rois_path = read_json_file(run_files_path)['ROIs'][functional_space]
     assert os.path.exists(rois_path), f'dir_path={rois_path} does not exist.'
     rois_path_dict = {} # {key=surface or volume, value=dict{key=roi_name, value=list[roi_path]}}
     for d in os.listdir(rois_path):
@@ -47,218 +66,223 @@ def fetch_nsd_rois_and_labels(functional_space : str, rois_setup : namedtuple) -
     assert len(files_path_list) == 4, print(f'{files_path_list}')
     json_path = [f for f in files_path_list if f.endswith('.json')][0]
     files_path_list.remove(json_path)
-    _, mask_data = read_nii_file([x for x in files_path_list if '.nii.gz' in x and all(sub not in x for sub in ['lh.', 'rh.'])][0])
+    _, fmri_mask = read_nii_file([x for x in files_path_list if '.nii.gz' in x and all(sub not in x for sub in ['lh.', 'rh.'])][0])
 
     label_tags = read_json_file(json_path)
     label_tags = {int(key) : value for key, value in label_tags.items()}
     labels = [label_tags[threshold] for threshold in thresholds] if not len(thresholds) == 0 else [value for key, value in label_tags.items() if key > 0]
     labels_string = '_'.join(labels)
 
-    thresholds = thresholds if not len(thresholds) == 0 else list(range(1, int(np.max(mask_data))+1))
+    thresholds = thresholds if not len(thresholds) == 0 else list(range(1, int(np.max(fmri_mask))+1))
 
-    return mask_data, thresholds, labels_string
+    rois_datapoint = namedtuple('rois_datapoint', ['fmri_mask', 'thresholds', 'labels_string'])
+    return rois_datapoint(fmri_mask, thresholds, labels_string)
 
-def make_nsd_dataset(subj_path : str, functional_space : str, mask_data : np.array, 
-                     thresholds : list[int], labels_string : str, fmri2embedding : bool = False 
-                     ) -> tuple[np.array, np.array, np.array, np.array, np.array, str, str]:
-    def __masking_fmri_to_array__(fmri_data : np.array, mask_data : np.array, thresholds : list[int]) -> np.array:
+def mask_fMRI(functional_space : str, rois_datapoint : tuple[np.array, list[int], str]) -> None:
+    """  
+    Masks fMRI data using a specified mask and thresholds, and saves the masked data for each trial.  
+
+    This function processes fMRI data by applying a mask and extracting data corresponding to specific  
+    regions of interest (ROIs) defined by threshold values. The masked data is saved as a `.npy` file  
+    for each trial in the dataset.  
+
+    Args:  
+        functional_space (str): A string representing the functional space (e.g., 'MNI', 'native') in  
+            which the fMRI data is represented.  
+        rois_datapoint (tuple[np.array, list[int], str]): A tuple containing:  
+            - fmri_mask (np.array): A 3D numpy array representing the mask for the fMRI data.  
+            - thresholds (list[int]): A list of integer values specifying the mask labels to include.  
+            - labels_string (str): A string used to label the output files.  
+
+    Returns:  
+        None: The function performs file I/O operations and does not return any value.  
+
+    Raises:  
+        AssertionError: If required files or directories are missing, or if unexpected conditions  
+            (e.g., multiple fMRI paths) are encountered.  
+    """ 
+    
+    def __masking_fmri_to_array__(fmri_data : np.array, fmri_mask : np.array, thresholds : list[int]) -> np.array:
         """  
-        """ 
-        mask_data = mask_data.astype(np.int16)
-        mask_bool = np.isin(mask_data, thresholds)
+        Applies a mask to fMRI data based on specified threshold values and returns the masked data as a 1D array.  
+
+        This function takes in fMRI data, a mask, and a list of threshold values. It identifies the voxels in the mask  
+        that match the threshold values and extracts the corresponding data from the fMRI dataset. If no voxels match  
+        the thresholds, the function raises an assertion error.  
+
+        Args:  
+            fmri_data (np.array): A 3D or 4D numpy array representing the fMRI data. Each voxel contains a value  
+                (e.g., intensity or activation level) for a specific spatial location in the brain.  
+            fmri_mask (np.array): A 3D numpy array representing the mask for the fMRI data. Each voxel in the mask  
+                contains an integer label or value that can be used to filter the fMRI data.  
+            thresholds (list[int]): A list of integer values specifying the mask labels to include in the output.  
+                Only voxels in the mask with values matching these thresholds will be included.  
+
+        Returns:  
+            np.array: A 1D numpy array containing the fMRI data values corresponding to the voxels in the mask  
+                that match the specified thresholds. If no voxels match, an assertion error is raised.  
+
+        Raises:  
+            AssertionError: If no voxels in the mask match the specified thresholds, an error is raised with a  
+                descriptive message.  
+
+        Example:  
+            >>> fmri_data = np.random.rand(64, 64, 36)  # Example 3D fMRI data  
+            >>> fmri_mask = np.random.randint(0, 5, size=(64, 64, 36))  # Example mask with labels 0-4  
+            >>> thresholds = [1, 2]  # Include only voxels with mask values 1 or 2  
+            >>> masked_data = __masking_fmri_to_array__(fmri_data, fmri_mask, thresholds)  
+            >>> print(masked_data.shape)  # Output: (N,), where N is the number of matching voxels  
+        """  
+        fmri_mask = fmri_mask.astype(np.int16)
+        mask_bool = np.isin(fmri_mask, thresholds)
         masked_data = fmri_data[mask_bool] if np.any(mask_bool) else None
-        assert masked_data is not None, f'No voxels in thresholds={thresholds} found in mask_data.'
+        assert masked_data is not None, f'No voxels in thresholds={thresholds} found in fmri_mask.'
         return masked_data
     
-    # Save data as differnet ROIs(labels_string)
-    regions_saved_dir_path = join_paths(subj_path, functional_space, labels_string)
-    check_and_make_dirs(regions_saved_dir_path)
+    fmri_mask = rois_datapoint.fmri_mask
+    thresholds = rois_datapoint.thresholds
+    labels_string = rois_datapoint.labels_string
 
-    assert os.path.exists(run_files_path), f'run_files_path={run_files_path} does not exist, please run step1_run.sh first.'
-    run_files = read_json_file(join_paths(run_files_path))
-    uncond_embedding_path = run_files['uncond_embedding_path']
-    position_embeddings_path = run_files['position_embeddings_path']
-    causal_attention_mask_path = run_files['causal_attention_mask_path']
-    null_sample_hidden_states_path = run_files['null_sample_hidden_states_path']
-    caption_embedding_fixed_path = run_files['caption_embedding_fixed_path']
-    nullI_nullC_image_path = run_files['nullI_nullC_image_path']
-
-    uncond_embedding = np.load(uncond_embedding_path, allow_pickle=True)
-    assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} != (1, 77, 768)'
-    position_embeddings = np.squeeze(np.load(position_embeddings_path, allow_pickle=True))
-    assert position_embeddings.shape == (77, 768), f'position_embeddings.shape={position_embeddings.shape} != (77, 768)'
-    causal_attention_mask = np.load(causal_attention_mask_path, allow_pickle=True)
-    assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask.shape={causal_attention_mask.shape} != (1, 1, 77, 77)'
-    null_sample_hidden_states = np.load(null_sample_hidden_states_path, allow_pickle=True)
-    assert null_sample_hidden_states.shape == (77, 768), f'null_sample_hidden_states.shape={null_sample_hidden_states.shape}!= (77, 768)'
-    caption_embedding_fixed = np.load(caption_embedding_fixed_path, allow_pickle=True)
-    assert caption_embedding_fixed.shape == (3, 768), f'caption_embedding_fixed.shape={caption_embedding_fixed.shape} != (3, 768)'
-
-    for tag in ['test', 'train']:
-        json_path = run_files[functional_space][tag]['json']
-        dirs_path = run_files[functional_space][tag]['dirs']
-        strings_path = read_json_file(json_path) # index:string_path
-        
-        set_saved_dir_path = join_paths(regions_saved_dir_path, tag)
-        check_and_make_dirs(set_saved_dir_path)
-
-        # check all done, if exists, skip
-        all_done_path = join_paths(set_saved_dir_path, '_'.join([str(fmri2embedding), 'all_done']))
-        if os.path.exists(all_done_path):
-            continue
-
-        # load blip model
-        if fmri2embedding:
-            blip2_feature_extractor, bfe_vis_processors, _ = load_blip_models(mode = 'feature')
-
-        # Process fMRI, copy blipcation, cococaptions, coco_image, strings and done
-        for dir_path in tqdm(os.listdir(dirs_path), desc=f'process {tag}', leave=True):
-            if os.path.isdir(join_paths(dirs_path, dir_path)):
-                index = dir_path
-                # src dir 
-                src_dir_path = join_paths(dirs_path, dir_path)
-                assert os.path.exists(src_dir_path), f'{src_dir_path} does not exist'
-                # files path
-                files_path = [x for x in os.listdir(src_dir_path)]
-                fmri_path       = get_items_in_list_via_substrs(files_path, 'fmri')[0]
-                done_path       = get_items_in_list_via_substrs(files_path, 'done')[0]
-                coco_image_path = get_items_in_list_via_substrs(files_path, 'coco_image')[0]
-                blipcaption_path  = get_items_in_list_via_substrs(files_path, 'blipcaption')[0]
-                cococaptions_path = get_items_in_list_via_substrs(files_path, 'cococaptions')[0]
-                # dst dir
-                idx_dir_path = join_paths(set_saved_dir_path, index)
-                check_and_make_dirs(idx_dir_path)
-                
-                # check done, if exists, skip
-                done_path = join_paths(idx_dir_path, '_'.join([str(fmri2embedding), 'done']))
-                if os.path.exists(done_path):
-                    continue
-
-                # [coco image, blip caption, coco captions]
-                for basename in [coco_image_path, blipcaption_path, cococaptions_path]:
-                    src_path = join_paths(src_dir_path, basename)
-                    dst_path = join_paths(idx_dir_path, basename)
-                    if not os.path.exists(dst_path):
-                        shutil.copy(src_path, dst_path)
-                # strings
-                if not os.path.exists(join_paths(idx_dir_path, 'strings.json')):
-                    shutil.copy(src=strings_path[index], dst=join_paths(idx_dir_path, 'strings.json'))
-                # fMRI -> maked fMRI
-                fmri_data = np.load(join_paths(src_dir_path, fmri_path), allow_pickle=True)
-                masked_fmri = __masking_fmri_to_array__(fmri_data=fmri_data, mask_data=mask_data, thresholds=thresholds)
-                np.save(file=join_paths(idx_dir_path, 'masked_fmri.npy'), arr=masked_fmri)
-                if fmri2embedding:
-                    # masked fMRI -> embedding (32, 768)
-                    masked_fmri = (masked_fmri - np.iinfo(np.int16).min) / (np.iinfo(np.int16).max - np.iinfo(np.int16).min) # to 0~1
-                    masked_fmri = (masked_fmri*np.iinfo(np.uint8).max).astype(np.uint8) # to 0~255
-                    masked_fmri = masked_fmri.reshape(1, masked_fmri.shape[0], 1) # (K) -> (1, K, 1)
-                    masked_fmri = masked_fmri.repeat(3, axis=0) # (1, K, 1) -> (3, K, 1)
-                    masked_fmri = np.transpose(masked_fmri, (1, 2, 0)) # (3, K, 1) -> (K, 1, 3)
-                    masked_fmri = Image.fromarray(masked_fmri)
-                    masked_fmri = bfe_vis_processors['eval'](masked_fmri).unsqueeze(0).to(device)
-                    masked_fmri_embedding = blip2_feature_extractor.extract_features({'image' : masked_fmri}, mode='image').image_embeds # (1, 32, 768)
-                    masked_fmri_embedding = masked_fmri_embedding.squeeze().cpu().numpy()
-                    assert masked_fmri_embedding.shape == (32, 768), f'{masked_fmri_embedding.shape} != (32, 768)'
-                    np.save(file=join_paths(idx_dir_path, 'masked_fmri_embedding.npy'), arr=masked_fmri_embedding)
-                
-                # write done
-                with open(done_path, 'w') as f:
-                    f.write('Done')
-
-        # delete the loaded models
-        del blip2_feature_extractor, bfe_vis_processors
-        torch.cuda.empty_cache()
-        gc.collect() 
-
-        # write all_done
-        with open(all_done_path, 'w') as f:
-            f.write('Done')
+    # if done, return
+    method_done_path = join_paths(nsd_subject_saved_dir_path, '_'.join([mask_fMRI.__name__, labels_string, 'done']))
+    if os.path.exists(method_done_path):
+        return None
     
-    return namedtuple('dataPoint', ['uncond_embedding', 'position_embeddings', 'causal_attention_mask', 
-                                    'null_sample_hidden_states', 'caption_embedding_fixed',
-                                    'regions_saved_dir_path', 'nullI_nullC_image_path'
-                                   ])(uncond_embedding, position_embeddings, causal_attention_mask, 
-                                      null_sample_hidden_states, caption_embedding_fixed,
-                                      regions_saved_dir_path, nullI_nullC_image_path
-                                   )
+    assert os.path.exists(run_files_path), f'run_files_path={run_files_path} does not exist, please run step1_run.sh first.'
+    run_files = read_json_file(run_files_path)
+    trial_path_list = [join_paths(run_files[tag], d) for tag in ['test', 'train'] for d in os.listdir(run_files[tag])]
 
-dataset_point = namedtuple('dataset_point', ['index', 'coco_image', 'masked_fmri', 'strings_json_path',
-                                             'image_embedding', 'caption_embedding_variable'])
+    for trial_path in tqdm(trial_path_list, desc='Masking fMRI', leave=True):
+        fmri_path = get_items_in_list_via_substrs(os.listdir(trial_path), functional_space, 'fmri')
+        assert len(fmri_path) == 1, f'Found multiple fMRI paths: {fmri_path}'
+        fmri_path = fmri_path[0]
+        assert os.path.exists(join_paths(trial_path, fmri_path)), f'fmir_path={join_paths(trial_path, fmri_path)} does not exist.'
+        _, fmri = read_nii_file(join_paths(trial_path, fmri_path))
+        masked_fmri = __masking_fmri_to_array__(fmri, fmri_mask, thresholds)
+        np.save(join_paths(trial_path, f'{functional_space}_{labels_string}.npy'), masked_fmri)
+
+    # write done
+    with open(method_done_path, 'w') as f:
+        f.write('done')
+
+    return None
+
+blip2_dataset_point = namedtuple('blip2_dataset_point', 
+                                ['trial', 'image', 'masked_fmri', 'image_embedding'])
+# blip2_dataset_point = namedtuple('blip2_dataset_point', 
+#                                 ['trial', 'image', 'masked_fmri', 'image_embedding', 'prompt', 'caption'])
+# blipdiffusion_dataset_point = namedtuple('blipdiffusion_dataset_point',
+#                                         ['trial', 'image', 'masked_fmri', 'image_embedding', 'caption_embedding'])
+blipdiffusion_dataset_point = namedtuple('blipdiffusion_dataset_point',
+                                        ['trial', 'image', 'masked_fmri', 'category', 'caption'])
+
 class NSD_Dataset(Dataset):
     """
     load proprocessed data from hdf5 file
     """
-    def __init__(self, root_dir : str, caption_type : str) -> None:
+    def __init__(self, functional_space : str, embedding_space : str, 
+                 labels_string : str, set_name : str) -> None:
         super().__init__()
-        assert os.path.exists(root_dir), f'{root_dir} does not exist.'
-        self.dirs = {int(d) : os.path.join(root_dir, d) for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))}
-        assert caption_type in ['blip', 'coco', 'b', 'c'], f'caption_type={caption_type} is not supported, must be one of [blip, coco, b, c].'
-        self.embedding_dir_basename = 'blipcaption' if caption_type in ['blip', 'b'] else 'cococaptions'
+        self.functional_space = functional_space
+        self.embedding_space = embedding_space
+        self.labels_string = labels_string
 
-    def __process_masked_fmri__(self, masked_fmri : np.array, 
-                                clip_min : int = np.iinfo(np.int16).min, 
-                                clip_max : int = np.iinfo(np.int16).max) -> np.array:
-        masked_fmri = np.clip(masked_fmri, clip_min, clip_max)
-        masked_fmri /= np.abs(clip_min)
+        assert set_name in ['train', 'test'], f'set_name={set_name} is not supported, must be one of [train, test].'
+        self.set_name = set_name
+
+        assert os.path.exists(run_files_path), f'run_files_path={run_files_path} does not exist, please run step1_run.sh first.'
+        run_files = read_json_file(run_files_path)
+        self.set_files = [join_paths(run_files[set_name], x) for x in os.listdir(run_files[set_name])]
+
+    def __get_the_only_items_in_list_via_substrs__(self, item_list : list[str], *substrs : str) -> str:
+        items_list = get_items_in_list_via_substrs(item_list, *substrs)
+        assert len(items_list) == 1, f'Found multiple items: {items_list}'
+        return items_list[0]
+
+    def __preprocess_masked_fmri__(self, masked_fmri : np.array) -> torch.Tensor:
+        if self.labels_string == 'ventral':
+            # max: max=32767.0, min=10649.0
+            # min: max=-8565.0, min=-32768.0
+            # return masked_fmri / 1e4
+            masked_fmri = (masked_fmri-277.7413027138099) / 1349.5317774050227
+        else: # whole_cortex: early_midventral_midlateral_midparietal_ventral_lateral_parietal
+            masked_fmri = (masked_fmri-240.39239099458842) / 939.6683912182586
+        # masked_fmri = np.clip(masked_fmri, -3, 3)
         return masked_fmri
+            
+
+    def __preprocess_image_embedding__(self, image_embedding : np.array) -> np.array:
+        if self.embedding_space == 'blip2':
+            # max: max=18.239103317260742, min=9.160021781921387
+            # min: max=-20.08559226989746, min=-25.672496795654297
+            # image_embedding = np.round(image_embedding).astype(np.int16)
+            # image_embedding = np.clip(image_embedding, -1, 1)
+            image_embedding = image_embedding[0]
+            image_embedding = np.where(image_embedding < -0.5, 0, 
+                              np.where((image_embedding >= -0.5) & (image_embedding < 0), 1, 
+                              np.where((image_embedding >= 0) & (image_embedding <= 0.5), 2, 3)))
+            # image_embedding = np.where(image_embedding < -0.5, 0, 
+            #                   np.where((image_embedding >= -0.5) & (image_embedding < -0.25), 1, 
+            #                   np.where((image_embedding >= -0.25) & (image_embedding < 0), 2, 
+            #                   np.where((image_embedding >= 0) & (image_embedding < 0.25), 3, 
+            #                   np.where((image_embedding >= 0.25) & (image_embedding < 0.5), 4, 5)))))
+            image_embedding = np.eye(4)[image_embedding] 
+            return image_embedding # [-1, 1]
     
-    def __process_blip_image_embedding__(self, blip_image_embedding : np.array) -> np.array:
-        blip_image_embedding = np.clip(blip_image_embedding, -2.1, 2.1)
-        # blip_image_embedding = np.around(blip_image_embedding, 1) # max=4.3, min=-5.6
-        # blip_image_embedding = np.clip(blip_image_embedding, -2.1, 2.1) # max=2.1, min=-2.1
-        # blip_image_embedding += 2.1 # max=4.2, min=0
-        # blip_image_embedding = (blip_image_embedding*10).astype(np.uint8) # max=42, min=0
-        # assert blip_image_embedding.max() <= 42, f'{blip_image_embedding.max()} > 42'
-        # # one-hot encoding
-        # blip_image_embedding = np.eye(42+1, dtype=np.uint8)[blip_image_embedding] 
-        return blip_image_embedding
-    
-    def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, str]:
-        dir_path = self.dirs[index]
-        
-        '''
-        original image
-        coco_image.shape = (425, 425, 3)
-        '''
-        coco_image = np.array(Image.open(os.path.join(dir_path, 'coco_image.png')))
-        
-        '''
-        input tensor: Brain Space
-        masked_fmri.shape = (k,)
-        func1mm-early: k=34509
-        masked_fmri_embedding.shape = (32, 768)
-        '''
-        masked_fmri = np.load(os.path.join(dir_path, 'masked_fmri.npy'), allow_pickle=True)
-        masked_fmri = self.__process_masked_fmri__(masked_fmri, clip_min=-2846, clip_max=4117)
-        # masked_fmri_embedding = np.load(os.path.join(dir_path, 'masked_fmri_embedding.npy'), allow_pickle=True)
+    def __getitem__(self, index) -> tuple[int, torch.Tensor, torch.Tensor, torch.Tensor]:
+        dir_path = self.set_files[index]
+        file_path_list = [join_paths(dir_path, x) for x in os.listdir(dir_path)]
 
-        '''
-        target embedding: BLIP Space
-        blip_image_embedding.shape = (16, 768)
-        blip_caption_embedding_variable.shape = (58, 768)
-        '''
-        embedding_dir_path = join_paths(dir_path, self.embedding_dir_basename)
-        image_embedding = np.load(join_paths(embedding_dir_path, 'image_embedding.npy'), allow_pickle=True)
-        image_embedding = self.__process_blip_image_embedding__(image_embedding)
-        caption_embedding_variable = np.load(join_paths(embedding_dir_path, 'caption_embedding_variable.npy'), allow_pickle=True)
-        
-        '''
-        strings: json file
-        '''
-        strings_json_path = os.path.join(dir_path, 'strings.json')
-        
-        # ndarray -> tensor
-        coco_image = torch.tensor(coco_image, dtype=torch.float32)
-        masked_fmri = torch.tensor(masked_fmri, dtype=torch.float32)                   
-        image_embedding = torch.tensor(image_embedding, dtype=torch.float32)  
-        caption_embedding_variable = torch.tensor(caption_embedding_variable, dtype=torch.float32)
+        # trial
+        trial = os.path.basename(dir_path)
 
-        # Return data point
-        return dataset_point(index, coco_image, masked_fmri, strings_json_path,
-                             image_embedding, caption_embedding_variable)
+        # image 
+        image_path = self.__get_the_only_items_in_list_via_substrs__(file_path_list, 'image', 'png')
+        image = np.array(Image.open(image_path).convert('RGB'))
 
+        # masked_fmri
+        # shape : {
+        #     'func1mm_ventral'    : (44656),
+        #     'func1pt8mm_ventral' : (7604 ),
+        #     'func1mm_whole_cortex'    : (161510),
+        # }
+        masked_fmri_path = self.__get_the_only_items_in_list_via_substrs__(file_path_list, '_'.join([self.functional_space, self.labels_string]), 'npy')
+        masked_fmri = np.load(masked_fmri_path, allow_pickle=True)
+        masked_fmri = self.__preprocess_masked_fmri__(masked_fmri)
+
+        # caption and category
+        strings = read_json_file(self.__get_the_only_items_in_list_via_substrs__(file_path_list, 'strings', 'json'))
+        caption = strings['blip2_caption']
+        category = strings['category_string']
+        
+        # blip2: image_embedding
+        if self.embedding_space == 'blip2':
+            # blip2: shape=(677, 1408)
+            image_embedding_path = self.__get_the_only_items_in_list_via_substrs__(file_path_list, self.embedding_space, 'image_embedding', 'npy')
+            image_embedding = np.load(image_embedding_path, allow_pickle=True)
+            image_embedding = self.__preprocess_image_embedding__(image_embedding)
+        # bipldiffusion: image_embedding, caption_embedding
+        elif self.embedding_space == 'blipdiffusion':
+            # blipdiffusion: shape=(16, 768)
+            image_embedding_path = self.__get_the_only_items_in_list_via_substrs__(file_path_list, self.embedding_space, 'image_embedding', 'npy')
+            image_embedding = np.load(image_embedding_path, allow_pickle=True)
+            # blipdiffusion: shape=(58, 768)
+            caption_embedding_path = self.__get_the_only_items_in_list_via_substrs__(file_path_list, self.embedding_space, 'caption_embedding', 'npy')
+            caption_embedding = np.load(caption_embedding_path, allow_pickle=True)
+
+        # np.array -> torch.Tensor, and return 
+        image = torch.tensor(image, dtype=torch.int16)
+        masked_fmri = torch.tensor(masked_fmri, dtype=torch.float32)
+        image_embedding = torch.tensor(image_embedding, dtype=torch.float32)
+        if self.embedding_space == 'blip2': 
+            return blip2_dataset_point(trial, image, masked_fmri, image_embedding)
+        elif self.embedding_space == 'blipdiffusion': 
+            caption_embedding = torch.tensor(caption_embedding, dtype=torch.float32)
+            # return blipdiffusion_dataset_point(trial, image, masked_fmri, image_embedding, caption_embedding)
+            return blipdiffusion_dataset_point(trial, image, masked_fmri, category, caption)
+        
     def __len__(self) -> int:
-        return len(self.dirs)
+        return len(self.set_files)
     
 
 ########################

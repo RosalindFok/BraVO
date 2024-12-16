@@ -58,7 +58,7 @@ class Blip2T5(Blip2Base):
 
         self.tokenizer = self.init_tokenizer()
 
-        self.visual_encoder, self.ln_vision = self.init_vision_encoder(
+        self.visual_encoder, self.ln_vision = self.init_vision_encoder( # blip2.py
             vit_model, img_size, drop_path_rate, use_grad_checkpoint, vit_precision
         )
         if freeze_vit:
@@ -242,32 +242,18 @@ class Blip2T5(Blip2Base):
     
     ### BraVO 
     @torch.no_grad()
-    def generate_image_embeddings(self, images : torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def generate_image_embeddings(self, images : torch.Tensor) -> torch.Tensor:
         """
         images.shape = [bs, 3, H, W]
         images -> embeddings, attentions
         """
         
         with self.maybe_autocast():
-            image_embeds = self.ln_vision(self.visual_encoder(images))
+            image_embeds = self.ln_vision(self.visual_encoder(images)) 
         image_embeds = image_embeds.float() # shape=[bs, 677, 1408]
-        image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
-            images.device
-        ) # all 1
-        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
-        query_output = self.Qformer.bert(
-            query_embeds=query_tokens,
-            encoder_hidden_states=image_embeds,
-            encoder_attention_mask=image_atts,
-            return_dict=True,
-        )
-        # image_embedding: type=torch.Tensor, shape=[bs, 32, 2048]
-        image_embeddings = self.t5_proj(query_output.last_hidden_state)
-        # image_attentions: type=torch.Tensor, shape=[bs, 32], each element is 1
-        image_attentions = torch.ones(image_embeddings.size()[:-1], dtype=torch.long).to(images.device)
-
-        return image_embeddings, image_attentions
-    
+        
+        return image_embeds
+        
     @torch.no_grad()
     def generate_default_prompt_embeddings(self, batch_size : int, device : torch.device
                                    ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -278,7 +264,7 @@ class Blip2T5(Blip2Base):
         prompt = self.prompt # "a photo of"
         prompt = [prompt] * batch_size
         
-        # when prompt is "a photo of", input_tokens.input_ids = [   3,    9, 1202,   13,    1]
+        # when prompt is "a photo of", input_tokens.input_ids = [3, 9, 1202, 13, 1]
         input_tokens = self.t5_tokenizer(
             prompt, padding="longest", return_tensors="pt"
         ).to(device) # class: 'transformers.tokenization_utils_base.BatchEncoding
@@ -294,7 +280,9 @@ class Blip2T5(Blip2Base):
     @torch.no_grad()
     def generate_captions_via_embedding( 
         self,
-        samples : dict[str, torch.Tensor],
+        image_embeds : torch.Tensor,
+        prompt_embeddings : torch.Tensor,
+        prompt_attentions : torch.Tensor,
         use_nucleus_sampling : bool = False,
         num_beams : int = 5,
         max_length : int = 30,
@@ -304,12 +292,28 @@ class Blip2T5(Blip2Base):
         length_penalty : float = 1.0, 
         num_captions : int = 1,
         temperature : int = 1,
-    ):
+    ):  
+        # calculate image_embeddings and image_attentions via image_embeds
+        image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
+            image_embeds.device
+        ) # all 1
+        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
+        query_output = self.Qformer.bert(
+            query_embeds=query_tokens,
+            encoder_hidden_states=image_embeds,
+            encoder_attention_mask=image_atts,
+            return_dict=True,
+        )
+        # image_embedding: type=torch.Tensor, shape=[bs, 32, 2048] 
+        image_embeddings = self.t5_proj(query_output.last_hidden_state)
+        # image_attentions: type=torch.Tensor, shape=[bs, 32], each element is 1
+        image_attentions = torch.ones(image_embeddings.size()[:-1], dtype=torch.long).to(image_embeds.device)
+
         # concatenate embeddings and attentions
         # inputs_embeds: type=torch.Tensor, shape=[bs, 37, 2048]
-        inputs_embeds = torch.cat([samples['image_embedding'], samples['prompt_embedding']], dim=1)
+        inputs_embeds = torch.cat([image_embeddings, prompt_embeddings], dim=1)
         # attention_mask: all 1
-        attention_mask = torch.cat([samples['image_attention'], samples['prompt_attention']], dim=1) 
+        attention_mask = torch.cat([image_attentions, prompt_attentions], dim=1) 
 
         with self.maybe_autocast(dtype=torch.bfloat16):
             # outputs is word embedding: type=torch.Tensor, shape=[bs, 28]

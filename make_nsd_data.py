@@ -10,12 +10,11 @@ from tqdm import tqdm
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from collections import Counter, defaultdict, namedtuple
-from lavis.models.blip_diffusion_models.utils import preprocess_canny
 
 from config import configs_dict
 from models import device, num_workers, load_blip_models
 from utils import NSD_dir_path, run_files_path, nsd_subject_saved_dir_path
-from utils import join_paths, read_nii_file, save_nii_file, check_and_make_dirs, get_file_size, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs, BLIP_Prior_Tools
+from utils import join_paths, read_nii_file, save_nii_file, read_json_file, write_json_file, merge_dicts_if_no_conflict, get_items_in_list_via_substrs, BLIP_Prior_Tools
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false' 
 
@@ -75,13 +74,6 @@ class NSD_DATA():
         # Ref: https://cvnlab.slite.page/p/M3ZvPmfgU3/General-Information#1d5942f6
         self.coco_annotation_dir_path = join_paths(NSD_dir_path, 'nsddata_stimuli', 'stimuli', 'nsd', 'annotations')
 
-        # ## saved path of this subject
-        # self.subject_saved_dir_path = join_paths(nsd_subject_saved_dir_path, self.functional_space)
-
-        # ## Save the results processed by BLIPs
-        # self.blips_output_dir_path = join_paths(self.subject_saved_dir_path, 'blips_output')
-        # check_and_make_dirs(self.blips_output_dir_path)
-    
     def read_behav_responses_tsv(self) -> pd.core.frame.DataFrame:
         """  
         Reads behavioral response data from a tab-separated values (TSV) file and returns it as a Pandas DataFrame.  
@@ -303,7 +295,7 @@ class NSD_DATA():
         start_time = time.time()
         # saved path for ROIs
         saved_rois_path = join_paths(nsd_subject_saved_dir_path, 'ROIs', self.functional_space)
-        check_and_make_dirs(saved_rois_path)
+        os.makedirs(saved_rois_path, exist_ok=True)
 
         # https://cvnlab.slite.page/p/X_7BBMgghj/ROIs#6824f30b and https://cvnlab.slite.page/p/X_7BBMgghj/ROIs#73ec0b9c
         rois_path_list = [join_paths(self.roi_files_path, x) for x in os.listdir(self.roi_files_path) if x.endswith('.nii.gz')]
@@ -316,7 +308,7 @@ class NSD_DATA():
             # saved path 
             ROIs_type = ROIs_type.lower()
             saved_path = join_paths(saved_rois_path, ROIs_type, tag)
-            check_and_make_dirs(saved_path)
+            os.makedirs(saved_path, exist_ok=True)
 
             # Surface/Volume ROIs
             roi_path_list = get_items_in_list_via_substrs(rois_path_list, tag) # itself, lh, rh
@@ -342,6 +334,7 @@ class NSD_DATA():
                     assert len(line) == 2, f'Invalid line: {line} of path = {label_path}'
                     label_tags_dict[int(line[0])] = line[-1]
             write_json_file(path = join_paths(saved_path, 'label_tags.json'), data = label_tags_dict)
+            return None
 
         ## Surface-derived ROIs
         # https://cvnlab.slite.page/p/X_7BBMgghj/ROIs#b7d9d230
@@ -407,26 +400,6 @@ class NSD_DATA():
         print(f'It took {end_time - start_time:.2f} seconds to get ROIs to {saved_rois_path}.')
         return saved_rois_path
 
-    # @staticmethod
-    # def update_run_files_info(new_dict : dict[any, any]) -> None:
-    #     """  
-       
-    #     """  
-    #     assert isinstance(new_dict, dict), f'new_dict must be dict, but got {type(new_dict)}'
-        
-    #     if not os.path.exists(run_files_path):
-    #         write_json_file(path=run_files_path, data=new_dict)
-    #     else:
-    #         old_dict = read_json_file(path=run_files_path)
-    #         for new_key, new_value in new_dict.items():
-    #             if new_key in old_dict:
-    #                 old_dict[new_key].update(new_value)
-    #             else:
-    #                 old_dict[new_key] = new_value
-    #         write_json_file(path=run_files_path, data=old_dict) 
-        
-    #     assert read_json_file(path=run_files_path) is not None, f'failed to update {run_files_path}!'
-
     def make_pairs(self) -> None:
         """
         Deletes trials where ISOLD=1 (old images) or ISCORRECT=0 (incorrect responses).  
@@ -443,7 +416,7 @@ class NSD_DATA():
         # if done, return
         method_done_path = join_paths(nsd_subject_saved_dir_path, '_'.join([self.make_pairs.__name__, self.functional_space, 'done']))
         if os.path.exists(method_done_path):
-            return
+            return None
         
         ## ROIs
         saved_rois_path = self.read_ROIs()
@@ -486,8 +459,8 @@ class NSD_DATA():
         ## Paths of train set and test set
         train_saved_dir_path = join_paths(nsd_subject_saved_dir_path, 'train')
         test_saved_dir_path  = join_paths(nsd_subject_saved_dir_path, 'test')
-        check_and_make_dirs(train_saved_dir_path)
-        check_and_make_dirs(test_saved_dir_path)
+        os.makedirs(train_saved_dir_path, exist_ok=True)
+        os.makedirs(test_saved_dir_path, exist_ok=True)
         write_json_file(path=run_files_path, data={**read_json_file(path=run_files_path), 
                                                    **{'train': train_saved_dir_path, 
                                                       'test' : test_saved_dir_path}})
@@ -515,7 +488,7 @@ class NSD_DATA():
                     # Test Set
                     else:
                         saved_path = join_paths(test_saved_dir_path, session_run_trial_string)
-                    check_and_make_dirs(saved_path)
+                    os.makedirs(saved_path, exist_ok=True)
                     
                     # fMRI
                     fmri_path = join_paths(saved_path, f'{self.functional_space}_fmri.nii.gz')
@@ -558,10 +531,11 @@ class NSD_DATA():
         with open(method_done_path, 'w') as f:
             f.write('done')
         
+        return None
 
     def blip2_process(self) -> None:
         """  
-        Processes image embeddings and captions using the BLIP2 model for train and test datasets.  
+        Generates image_embeddings and captions using the BLIP2 model for train and test datasets.  
         """ 
         # if done, return
         method_done_path = join_paths(nsd_subject_saved_dir_path, '_'.join([self.blip2_process.__name__, 'done']))
@@ -578,19 +552,22 @@ class NSD_DATA():
         dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
         for batches in tqdm(dataloader, desc=f'BLIP2t5 processing', leave=True):
             dir_paths = batches.dir_path
-            images = batches.image.to(device) # shape=[batch_size, 3, 364, 364]
-            image_embeddings, image_attentions = blip2t5_model.generate_image_embeddings(images=images)
-            prompt_embeddings, prompt_attentions = blip2t5_model.generate_default_prompt_embeddings(batch_size=image_embeddings.size(0), device=device) # size(0)<=batch_size
-            output_texts = blip2t5_model.generate_captions_via_embedding(samples={
-                'image_embedding'  : image_embeddings,
-                'image_attention'  : image_attentions,
-                'prompt_embedding' : prompt_embeddings,
-                'prompt_attention' : prompt_attentions,
-            },   max_length=100, min_length=20)
+            images = batches.image.to(device)
+            # image_embeds.shape=[bs, 677, 1408]
+            image_embeds = blip2t5_model.generate_image_embeddings(images=images)
+            # prompt_embeddings.shape=[bs, 5, 2048], prompt_attentions.shape=[bs, 5]
+            prompt_embeddings, prompt_attentions = blip2t5_model.generate_default_prompt_embeddings(batch_size=image_embeds.size(0), device=device) # size(0)<=batch_size
+            output_texts = blip2t5_model.generate_captions_via_embedding(
+                image_embeds=image_embeds,
+                prompt_embeddings=prompt_embeddings,
+                prompt_attentions=prompt_attentions,
+                max_length=configs_dict['blip2']['max_length'], 
+                min_length=configs_dict['blip2']['min_length']
+            )
             # save image embeddings and captions
-            image_embeddings = image_embeddings.cpu().numpy()
-            for dir_path, img_emb, caption in zip(dir_paths, image_embeddings, output_texts):
-                np.save(join_paths(dir_path, 'blip2_image_embedding.npy'), img_emb)
+            image_embeds = image_embeds.cpu().numpy()
+            for dir_path, img_embed, caption in zip(dir_paths, image_embeds, output_texts):
+                np.save(join_paths(dir_path, 'blip2_image_embedding.npy'), img_embed)
                 strings_json_path = join_paths(dir_path, 'strings.json')
                 strings = read_json_file(strings_json_path)
                 strings['blip2_caption'] = caption
@@ -598,8 +575,9 @@ class NSD_DATA():
 
         # save fixed embeddsings: prompt_embedding, image_attention, prompt_attention
         blip2_output_fixed_dir_path = join_paths(nsd_subject_saved_dir_path, 'blip2_output_fixed')
-        for name, tensor in zip(['prompt_embedding', 'image_attention', 'prompt_attention'],
-                                [ prompt_embeddings,  image_attentions,  prompt_attentions]):
+        os.makedirs(blip2_output_fixed_dir_path, exist_ok=True)
+        for name, tensor in zip(['prompt_embedding', 'prompt_attention'],
+                                [ prompt_embeddings,  prompt_attentions]):
             file_path = join_paths(blip2_output_fixed_dir_path, f'{name}.npy')
             if not os.path.exists(file_path):
                 array = tensor.float().cpu().numpy()[0]
@@ -615,271 +593,78 @@ class NSD_DATA():
         
         # delete loaded models
         del blip2t5_model, blip2t5_vis_processors
+        
+        return None
 
     def blipdiffusion_process(self) -> None:
-        pass
-        # blipdiffusion_generated_embeddings_of_train_set_path = join_paths(self.blips_output_dir_path, 'blipdiffusion_generated_embeddings_of_train.hdf5')
-        # blipdiffusion_generated_embeddings_of_test_set_path  = join_paths(self.blips_output_dir_path, 'blipdiffusion_generated_embeddings_of_test.hdf5')
+        """
+        Generates image_embeddings and caption_embedings using the BLIP Diffusion Encoder for train and test datasets.  
+        """
 
-        # def __check_hdf5_file__(path : str, target_length : int) -> bool:
-        #     if os.path.exists(path):
-        #         try:
-        #             with h5py.File(path, 'r') as hdf5_file:
-        #                 if len(hdf5_file.keys()) == target_length:
-        #                     return True
-        #         except Exception as e:
-        #             os.remove(path)
-        #     return False
+        # if done, return
+        method_done_path = join_paths(nsd_subject_saved_dir_path, '_'.join([self.blipdiffusion_process.__name__, 'done']))
+        if os.path.exists(method_done_path):
+            return
 
-        # need_embedding_train = __check_hdf5_file__(path=blipdiffusion_generated_embeddings_of_train_set_path, target_length=num_train)
-        # need_embedding_test  = __check_hdf5_file__(path=blipdiffusion_generated_embeddings_of_test_set_path , target_length=num_test)
-        # uncond_embedding_path = join_paths(self.blips_output_dir_path, 'uncond_embedding.npy')
-        # position_embeddings_path = join_paths(self.blips_output_dir_path, 'position_embeddings.npy')
-        # causal_attention_mask_path = join_paths(self.blips_output_dir_path, 'causal_attention_mask.npy')
-        # all_strings_train_path = join_paths(self.subject_saved_dir_path, 'all_strings_path_in_train.json')
-        # all_strings_test_path  = join_paths(self.subject_saved_dir_path, 'all_strings_path_in_test.json')
-        # null_sample_hidden_states_path = join_paths(self.blips_output_dir_path, 'null_sample_hidden_states.npy')
+        run_files = read_json_file(run_files_path)
+        trial_path_list = [join_paths(run_files[tag], d) for tag in ['test', 'train'] for d in os.listdir(run_files[tag])]
         
-        # fixed_paths = {
-        #     'uncond_embedding_path' : uncond_embedding_path,
-        #     'position_embeddings_path' : position_embeddings_path,
-        #     'causal_attention_mask_path' : causal_attention_mask_path,
-        #     'null_sample_hidden_states_path' : null_sample_hidden_states_path,
-        # }
-        # new_paths  = {
-        #     self.functional_space : {
-        #         'train' : {
-        #             'hdf5' : blipdiffusion_generated_embeddings_of_train_set_path,
-        #             'json' : all_strings_train_path
-        #         },
-        #         'test'  : {
-        #             'hdf5' : blipdiffusion_generated_embeddings_of_test_set_path,
-        #             'json' : all_strings_test_path
-        #         },
-        #         'rois_dir_path' : saved_rois_path,
-        #     },
-        # }
-        # run_files_dict = read_json_file(run_files_path) if os.path.exists(run_files_path) else fixed_paths 
-        # run_files_dict.update(new_paths)
-        # write_json_file(path=run_files_path, data=run_files_dict)
+        #  Load blip diffusion model
+        blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode='diffusion')
+        
+        for trial_path in tqdm(trial_path_list, desc=f'BLIP Diffusion processing', leave=True):
+            # image
+            image = Image.open(join_paths(trial_path, 'image.png')).convert('RGB')
+            image = bd_vis_processors['eval'](image).unsqueeze(0).to(device)
+            # caption
+            strings = read_json_file(join_paths(trial_path, 'strings.json'))
+            blip2_caption = strings['blip2_caption']
+            blip2_caption = [bd_txt_processors['eval'](blip2_caption)]
+            category = strings['category_string']
+            category = bd_txt_processors['eval'](category)
+            # generate
+            sample = {
+                        'cond_images'  : image,
+                        'prompt'       : blip2_caption,
+                        'cond_subject' : category,
+                        'tgt_subject'  : category,
+            }
+            hidden_states, position_embeddings, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
+            assert hidden_states.shape == (1, 77, 768), f'embedding shape={hidden_states.shape} != (1, 77, 768).'
+            assert position_embeddings.shape == (1, 77, 768), f'position_embeddings shape={position_embeddings.shape} != (1, 77, 768).'
+            assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask shape={causal_attention_mask.shape} != (1, 1, 77, 77).'
+            # 1. hidden_states - position_embeddings
+            hidden_states -= position_embeddings
+            # 2. split hidden_states into: image embedding, caption embedding, prefix, suffix
+            prefix, image_embedding, caption_embedding, suffix = BLIP_Prior_Tools.split_hidden_states(hidden_states)
+            # save image_embedding and caption_embedding
+            np.save(join_paths(trial_path, 'blipdiffusion_image_embedding.npy'), image_embedding.cpu().numpy())
+            np.save(join_paths(trial_path, 'blipdiffusion_caption_embedding.npy'), caption_embedding.cpu().numpy())
 
-        # if not (need_embedding_train and need_embedding_test):
-        #     # Load blip diffusion model
-        #     blip_diffusion_model, bd_vis_processors, bd_txt_processors = load_blip_models(mode='diffusion')
-        #     # save_uncond_embedding
-        #     uncond_embedding = blip_diffusion_model.generate_uncond_embedding(neg_prompt=configs_dict['blip_diffusion']['negative_prompt'])
-        #     uncond_embedding = uncond_embedding.cpu().numpy()
-        #     np.save(uncond_embedding_path, uncond_embedding)
-        #     assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} is not (1, 77, 768).'
+        # Save fixed embedding: uncond_embedding, position_embeddings, causal_attention_mask, prefix, suffix
+        blipdiffusion_output_fixed_dir_path = join_paths(nsd_subject_saved_dir_path, 'blipdiffusion_output_fixed')
+        os.makedirs(blipdiffusion_output_fixed_dir_path, exist_ok=True)
+        # uncond_embedding: negative prompt
+        uncond_embedding = blip_diffusion_model.generate_uncond_embedding(neg_prompt=configs_dict['blip_diffusion']['negative_prompt'])
+        assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} is not (1, 77, 768).'
+        # save as npy
+        for name, tensor in zip(['position_embeddings', 'causal_attention_mask', 'prefix', 'suffix', 'uncond_embedding'], 
+                                [ position_embeddings,   causal_attention_mask,   prefix,   suffix,   uncond_embedding]):
+            array = tensor.cpu().numpy()
+            np.save(join_paths(blipdiffusion_output_fixed_dir_path, f'{name}.npy'), array)
 
-        #     files_queue, tag_queue, hdf5_path_queue, captions_queue, json_path_queue = [], [], [], [], []
-        #     if not need_embedding_test:
-        #         files_queue.append(path_dict['test'])
-        #         tag_queue.append('Test')
-        #         hdf5_path_queue.append(blipdiffusion_generated_embeddings_of_test_set_path)
-        #         captions_queue.append(read_json_file(blip2t5_generated_captions_of_test_set_path))
-        #         json_path_queue.append(all_strings_test_path)
-        #     if not need_embedding_train:
-        #         files_queue.append(path_dict['train'])
-        #         tag_queue.append('Train')
-        #         hdf5_path_queue.append(blipdiffusion_generated_embeddings_of_train_set_path)
-        #         captions_queue.append(read_json_file(blip2t5_generated_captions_of_train_set_path))
-        #         json_path_queue.append(all_strings_train_path)
-        #     for files, tag, hdf5_path, captions, json_path in zip(files_queue, tag_queue, hdf5_path_queue, captions_queue, json_path_queue):
-        #         captions = {int(k) : v for k, v in captions.items()} 
-        #         all_strings_path = {} # {index : path}
-        #         with h5py.File(hdf5_path, 'w') as hdf5_file:
-        #             for index, files_dict in tqdm(files.items(), desc=f'Generate embeddings for {tag} set', leave=True):
-        #                 hdf5_group = hdf5_file.create_group(name=str(index))
-        #                 image_rgb = Image.open(files_dict['image']).convert('RGB')
-        #                 image = np.array(image_rgb)
-        #                 _, fmri = read_nii_file(files_dict['fmri'])
-        #                 strings_path = files_dict['strings']
-        #                 strings = read_json_file(strings_path)
-        #                 caption = captions[index]
-        #                 strings['blip_caption'] = caption
-        #                 write_json_file(path=strings_path, data=strings)
-        #                 all_strings_path[index] = strings_path
-        #                 category_string = strings['category_string'] # str
-        #                 blip_caption    = strings['blip_caption']    # str
-        #                 coco_captions   = strings['coco_captions']   # list[str]
+        # write blipdiffusion_output_fixed_dir_path into run_files
+        run_files['blipdiffusion_output_fixed'] = blipdiffusion_output_fixed_dir_path
+        write_json_file(path=run_files_path, data=run_files)
 
-        #                 cond_image = bd_vis_processors['eval'](image_rgb).unsqueeze(0).to(device)
-        #                 # Sample with prompt=category_string+blip_caption
-        #                 sample = {
-        #                     'cond_images'  : cond_image,
-        #                     'prompt'       : [bd_txt_processors['eval'](category_string+blip_caption)],
-        #                     'cond_subject' : bd_txt_processors['eval'](category_string),
-        #                     'tgt_subject'  : bd_txt_processors['eval'](category_string),
-        #                 }
-        #                 hidden_states_with_blipcaption, position_embeddings, causal_attention_mask = blip_diffusion_model.generate_embedding(samples=sample)
-        #                 hidden_states_with_blipcaption = hidden_states_with_blipcaption.squeeze().cpu().numpy()
-        #                 assert hidden_states_with_blipcaption.shape == (77, 768), f'embedding shape={hidden_states_with_blipcaption.shape} != (77, 768).'
-        #                 assert position_embeddings.shape == (1, 77, 768), f'position_embeddings shape={position_embeddings.shape} != (1, 77, 768).'
-        #                 assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask shape={causal_attention_mask.shape} != (1, 1, 77, 77).'
-                       
-        #                 # save: position_embeddings, causal_attention_mask, embeddings of null_imge & null_caption
-        #                 position_embeddings = position_embeddings.cpu().numpy()
-        #                 causal_attention_mask = causal_attention_mask.cpu().numpy()
-        #                 if not os.path.exists(causal_attention_mask_path):
-        #                     np.save(file=causal_attention_mask_path, arr=causal_attention_mask)
-        #                 assert np.allclose(causal_attention_mask, np.load(causal_attention_mask_path, allow_pickle=True), rtol=1e-5, atol=1e-8), f'In {tag}, causal_attention_mask of sample {index} is different from the one in {causal_attention_mask_path}.'
-        #                 if not os.path.exists(position_embeddings_path):
-        #                     np.save(file=position_embeddings_path, arr=position_embeddings)
-        #                 assert np.allclose(position_embeddings, np.load(position_embeddings_path, allow_pickle=True), rtol=1e-5, atol=1e-8), f'In {tag}, position_embeddings of sample {index} is different from the one in {position_embeddings_path}.'
-        #                 if not os.path.exists(null_sample_hidden_states_path):
-        #                     null_image = Image.fromarray(np.zeros_like(image))
-        #                     null_image = bd_vis_processors['eval'](null_image).unsqueeze(0).to(device)
-        #                     null_sample = {
-        #                         'cond_images'  : null_image,
-        #                         'prompt'       : [bd_txt_processors['eval']('')],
-        #                         'cond_subject' : bd_txt_processors['eval']('nothing'),
-        #                         'tgt_subject'  : bd_txt_processors['eval']('nothing')
-        #                     }
-        #                     null_hidden_states, _, _ = blip_diffusion_model.generate_embedding(samples=null_sample)
-        #                     null_hidden_states = null_hidden_states.squeeze().cpu().numpy()
-        #                     assert null_hidden_states.shape == (77, 768), f'null_hidden_states shape={null_hidden_states.shape} != (77, 768).'
-        #                     np.save(file=null_sample_hidden_states_path, arr=null_hidden_states)
-                       
-        #                 # Sample with prompt=category_string+coco_captions
-        #                 sample = {
-        #                     'cond_images'  : cond_image,
-        #                     'prompt'       : [bd_txt_processors['eval'](category_string + ' '.join(coco_captions))],
-        #                     'cond_subject' : bd_txt_processors['eval'](category_string),
-        #                     'tgt_subject'  : bd_txt_processors['eval'](category_string)
-        #                 }
-        #                 hidden_states_with_cococaptions, _, _ = blip_diffusion_model.generate_embedding(samples=sample)
-        #                 hidden_states_with_cococaptions = hidden_states_with_cococaptions.squeeze().cpu().numpy()
-        #                 assert hidden_states_with_cococaptions.shape == (77, 768), f'embedding shape={hidden_states_with_cococaptions.shape} != (77, 768).'
-                       
-        #                 for name, data in zip(['image', 'fmri', 'hidden_states_with_blipcaption', 'hidden_states_with_cococaptions'], 
-        #                                       [ image ,  fmri ,  hidden_states_with_blipcaption ,  hidden_states_with_cococaptions]): 
-        #                     hdf5_dataset = hdf5_group.create_dataset(name=name, shape=data.shape, dtype=data.dtype)
-        #                     hdf5_dataset[:] = data
-        #         write_json_file(path=json_path, data=all_strings_path)        
-        #         print(f'{hdf5_path} is created, the size of it is {get_file_size(hdf5_path)}')
+        # write done
+        with open(method_done_path, 'w') as f:
+            f.write('done')
 
-        #     # Delete the loaded model
-        #     del blip_diffusion_model, bd_vis_processors, bd_txt_processors   
+        # delete loaded models
+        del blip_diffusion_model, bd_vis_processors, bd_txt_processors
 
-        # run_files = read_json_file(run_files_path)
-        # uncond_embedding = np.load(run_files['uncond_embedding_path'], allow_pickle=True)
-        # position_embeddings = np.load(run_files['position_embeddings_path'], allow_pickle=True)
-        # causal_attention_mask = np.load(run_files['causal_attention_mask_path'], allow_pickle=True)
-        # null_sample_hidden_states = np.load(run_files['null_sample_hidden_states_path'], allow_pickle=True)
-        # assert uncond_embedding.shape == (1, 77, 768), f'uncond_embedding.shape={uncond_embedding.shape} != (1, 77, 768)'
-        # assert position_embeddings.shape == (1, 77, 768), f'position_embeddings.shape={position_embeddings.shape} != (1, 77, 768)'
-        # assert causal_attention_mask.shape == (1, 1, 77, 77), f'causal_attention_mask.shape={causal_attention_mask.shape} != (1, 1, 77, 77)'
-        # assert null_sample_hidden_states.shape == (77, 768), f'null_sample_hidden_states.shape={null_sample_hidden_states.shape} != (77, 768)'
-        # uncond_embedding = torch.from_numpy(uncond_embedding).to(device)
-        # causal_attention_mask = torch.from_numpy(causal_attention_mask).to(device)
-
-        # # load blip diffusion model
-        # blip_diffusion_model, _, _ = load_blip_models(mode = 'diffusion')
-
-        # # split null embedding and save the caption_embedding_fixed, 
-        # # remember to minus position_embedding when saving
-        # _, null_cap_embedding = BLIP_Prior_Tools.split_and_concat(null_sample_hidden_states-position_embeddings.squeeze(0))
-        # caption_embedding_fixed, _ = BLIP_Prior_Tools.split_caption_embedding(null_cap_embedding)
-        # caption_embedding_fixed_path = join_paths(self.blips_output_dir_path, 'caption_embedding_fixed.npy')
-        # run_files['caption_embedding_fixed_path'] = caption_embedding_fixed_path
-        # np.save(file=caption_embedding_fixed_path, arr=caption_embedding_fixed)
-        # # no need to minus position_embedding when generating
-        # null_img_embedding, null_cap_embedding = BLIP_Prior_Tools.split_and_concat(null_sample_hidden_states)
-
-
-        # # generate image via null_img+null_cap
-        # nullI_nullC_image_path = join_paths(self.blips_output_dir_path, 'nullI+nullC.png')
-        # if not os.path.exists(nullI_nullC_image_path):
-        #     hidden_state = torch.from_numpy(null_sample_hidden_states).unsqueeze(0).to(device)
-        #     generated_image = blip_diffusion_model.generate_image_via_embedding(
-        #                                 uncond_embedding=uncond_embedding,
-        #                                 hidden_states=hidden_state,
-        #                                 causal_attention_mask=causal_attention_mask,
-        #                                 seed=configs_dict['blip_diffusion']['iter_seed'],
-        #                                 guidance_scale=configs_dict['blip_diffusion']['guidance_scale'],
-        #                                 height=512,
-        #                                 width=512,
-        #                                 num_inference_steps=configs_dict['blip_diffusion']['num_inference_steps'],
-        #                             )
-        #     generated_image.convert('RGB').save(nullI_nullC_image_path)
-        # run_files['nullI_nullC_image_path'] = nullI_nullC_image_path
-
-        # # generate images for all samples
-        # for set_name in ['test', 'train']:
-        #     tag_dir_path = join_paths(self.blips_output_dir_path, set_name)
-        #     check_and_make_dirs(tag_dir_path)
-        #     run_files[self.functional_space][set_name]['dirs'] = tag_dir_path
-        #     hdf5_path = run_files[self.functional_space][set_name]['hdf5']
-
-        #     # check all done file, if exists, skip
-        #     all_done_path = join_paths(tag_dir_path, 'all_done')
-        #     if os.path.exists(all_done_path):
-        #         continue
-
-        #     with h5py.File(hdf5_path, 'r') as hdf5_file:
-        #         for cnt, index in enumerate(hdf5_file):
-        #             print(f"Processing sample {cnt+1} / {len(hdf5_file.keys())} in {set_name} set")
-        #             sample_dir_path = join_paths(tag_dir_path, str(index))
-        #             check_and_make_dirs(sample_dir_path)
-
-        #             # check done file, if exists, skip
-        #             done_path = join_paths(sample_dir_path, 'done')
-        #             if os.path.exists(done_path):
-        #                 continue
-
-        #             # coco image
-        #             coco_image = hdf5_file[index]['image'][:]
-        #             Image.fromarray(coco_image).save(join_paths(sample_dir_path, 'coco_image.png'))
-        #             # fMRI
-        #             fmri = hdf5_file[index]['fmri'][:]
-        #             np.save(file=join_paths(sample_dir_path, 'fmri.npy'), arr=fmri)
-        #             # blip diffusion process
-        #             for tag in ['blipcaption', 'cococaptions']:
-        #                 dir_path = join_paths(sample_dir_path, f'{tag}')
-        #                 check_and_make_dirs(dir_path)
-        #                 # blip embedding
-        #                 blip_hidden_states = hdf5_file[index][f'hidden_states_with_{tag}'][:]
-        #                 blip_hidden_states_minus_position_embedding = blip_hidden_states - position_embeddings.squeeze(0)
-        #                 # Save: blip_hidden_states_minus_position_embedding
-        #                 blip_img_embedding, blip_cap_embedding = BLIP_Prior_Tools.split_and_concat(blip_hidden_states_minus_position_embedding)
-        #                 caption_embedding_fixed, blip_cap_embedding_variable = BLIP_Prior_Tools.split_caption_embedding(blip_cap_embedding)
-        #                 assert np.allclose(caption_embedding_fixed, np.load(caption_embedding_fixed_path, allow_pickle=True), rtol=1e-5, atol=1e-8), f"caption_embedding_fixed in {tag}-{index} does not match with the one in {caption_embedding_fixed_path}"
-        #                 np.save(file=join_paths(dir_path, 'image_embedding.npy'), arr=blip_img_embedding)
-        #                 np.save(file=join_paths(dir_path, 'caption_embedding_variable.npy'), arr=blip_cap_embedding_variable)
-        #                 # Generate: blip_hidden_states
-        #                 blip_img_embedding, blip_cap_embedding = BLIP_Prior_Tools.split_and_concat(blip_hidden_states)
-        #                 samples = { # str : np.array
-        #                     'nullI+blipC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=null_img_embedding, txt_emb=blip_cap_embedding),
-        #                     'blipI+nullC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img_embedding, txt_emb=null_cap_embedding),
-        #                     'blipI+blipC' : BLIP_Prior_Tools.concatenate_embeddings(img_emb=blip_img_embedding, txt_emb=blip_cap_embedding),
-        #                 }
-        #                 for key, value in samples.items():
-        #                     image_path = join_paths(dir_path, f'{key}.png')
-        #                     if not os.path.exists(image_path):
-        #                         hidden_state = torch.from_numpy(value).unsqueeze(0).to(device)
-        #                         generated_image = blip_diffusion_model.generate_image_via_embedding(
-        #                                                 uncond_embedding=uncond_embedding,
-        #                                                 hidden_states=hidden_state,
-        #                                                 causal_attention_mask=causal_attention_mask,
-        #                                                 seed=configs_dict['blip_diffusion']['iter_seed'],
-        #                                                 guidance_scale=configs_dict['blip_diffusion']['guidance_scale'],
-        #                                                 height=coco_image.shape[0],
-        #                                                 width=coco_image.shape[1],
-        #                                                 num_inference_steps=configs_dict['blip_diffusion']['num_inference_steps']//10,
-        #                         )
-        #                         generated_image.convert('RGB').save(image_path)
-
-        #             # write done file
-        #             with open(done_path, 'w') as f:
-        #                 f.write('done')
-
-        #     # write all done file
-        #     with open(all_done_path, 'w') as f:
-        #         f.write('done')
-
-        # # Update run_files and save it
-        # write_json_file(path=run_files_path, data=run_files)
+        return None
 
 # make pairs of NSD
 if __name__ == '__main__':
